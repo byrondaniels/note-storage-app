@@ -1,0 +1,62 @@
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: notes-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: notesdb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - notes-network
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: notes-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - notes-network
+
+  backend:
+    build: ./backend
+    container_name: notes-backend
+    restart: unless-stopped
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+      QDRANT_URL: http://qdrant:6333
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mongo
+      - qdrant
+    networks:
+      - notes-network
+
+  frontend:
+    build: ./frontend
+    container_name: notes-frontend
+    restart: unless-stopped
+    environment:
+      VUE_APP_API_URL: http://localhost:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - notes-network
+
+volumes:
+  mongo_data:
+  qdrant_data:
+
+networks:
+  notes-network:
+    driver: bridge

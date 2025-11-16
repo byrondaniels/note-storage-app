@@ -1,0 +1,1322 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
+	"github.com/google/generative-ai-go/genai"
+	pb "github.com/qdrant/go-client/qdrant"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+)
+
+type Note struct {
+	ID       primitive.ObjectID     `json:"id" bson:"_id,omitempty"`
+	Title    string                 `json:"title" bson:"title"`
+	Content  string                 `json:"content" bson:"content"`
+	Summary  string                 `json:"summary" bson:"summary"`
+	Category string                 `json:"category" bson:"category"`
+	Created  time.Time              `json:"created" bson:"created"`
+	Metadata map[string]interface{} `json:"metadata" bson:"metadata"`
+}
+
+type NoteChunk struct {
+	ID       primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	NoteID   primitive.ObjectID `json:"note_id" bson:"note_id"`
+	Content  string             `json:"content" bson:"content"`
+	ChunkIdx int                `json:"chunk_idx" bson:"chunk_idx"`
+}
+
+type SearchRequest struct {
+	Query string `json:"query" binding:"required"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+type SearchResult struct {
+	Note  Note    `json:"note"`
+	Score float32 `json:"score"`
+}
+
+type QuestionRequest struct {
+	Question string `json:"question" binding:"required"`
+}
+
+type QuestionResponse struct {
+	Answer     string       `json:"answer"`
+	Sources    []SearchResult `json:"sources"`
+	Question   string       `json:"question"`
+}
+
+type AIQuestionRequest struct {
+	Content string `json:"content" binding:"required"`
+	Prompt  string `json:"prompt" binding:"required"`
+}
+
+type AIQuestionResponse struct {
+	Response string `json:"response"`
+}
+
+type SummarizeRequest struct {
+	NoteId  string `json:"noteId" binding:"required"`
+	Content string `json:"content" binding:"required"`
+}
+
+type SummarizeResponse struct {
+	Summary string `json:"summary"`
+}
+
+type ProcessingJob struct {
+	NoteID   primitive.ObjectID
+	Title    string
+	Content  string
+	Metadata map[string]interface{}
+}
+
+var (
+	notesCollection  *mongo.Collection
+	chunksCollection *mongo.Collection
+	collectionsClient pb.CollectionsClient
+	pointsClient     pb.PointsClient
+	genaiClient      *genai.Client
+	jobQueue         chan ProcessingJob
+	wg               sync.WaitGroup
+)
+
+// CATEGORIES defines all available note categories
+var CATEGORIES = []string{
+	// Personal & Life
+	"journal", "reflections", "goals", "ideas", "thoughts", "dreams", "personal-growth",
+	
+	// Health & Fitness
+	"recipes", "workouts", "meal-planning", "health-tips", "medical", "nutrition",
+	
+	// Work & Productivity
+	"meeting-notes", "tasks", "project-ideas", "research", "documentation", "work-thoughts",
+	
+	// Learning & Growth
+	"book-notes", "article-notes", "podcast-transcripts", "courses", "tutorials", "learning",
+	
+	// Relationships & Social
+	"relationship-thoughts", "family", "social-interactions", "networking", "communication",
+	
+	// Financial & Planning
+	"budgeting", "investments", "financial-planning", "expenses", "money-thoughts",
+	
+	// Travel & Adventure
+	"travel-plans", "places-to-visit", "travel-experiences", "adventure-ideas",
+	
+	// Creative & Hobbies
+	"writing-ideas", "art-projects", "creative-inspiration", "hobbies", "entertainment",
+	
+	// Technical & Code
+	"coding-notes", "technical-docs", "troubleshooting", "apis", "programming",
+	
+	// Other
+	"other", "miscellaneous", "random-thoughts",
+}
+
+const (
+	COLLECTION_NAME      = "notes_embeddings"
+	CHUNK_SIZE           = 1000
+	MAX_WORDS            = 10000
+	EMBEDDING_DIM        = 768
+	MIN_RELEVANCE_SCORE  = 0.3 // Filter out results below 30% relevance
+	
+	// Gemini AI Model Configuration
+	EMBEDDING_MODEL      = "text-embedding-004"     // For generating embeddings
+	GENERATION_MODEL     = "gemini-2.5-flash"       // For text generation and classification
+)
+
+func main() {
+	mongoURI := os.Getenv("MONGO_URI")
+	if mongoURI == "" {
+		mongoURI = "mongodb://mongo:27017"
+	}
+
+	qdrantURL := os.Getenv("QDRANT_URL")
+	if qdrantURL == "" {
+		qdrantURL = "qdrant:6334"  // Use gRPC port
+	}
+	
+	// Remove http:// prefix for gRPC connection and switch to gRPC port
+	if strings.HasPrefix(qdrantURL, "http://") {
+		qdrantURL = strings.TrimPrefix(qdrantURL, "http://")
+		qdrantURL = strings.Replace(qdrantURL, ":6333", ":6334", 1)  // Switch to gRPC port
+	}
+
+	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
+	if geminiAPIKey == "" {
+		log.Fatal("GEMINI_API_KEY environment variable is required")
+	}
+
+	mongoClient, err := mongo.Connect(context.TODO(), options.Client().ApplyURI(mongoURI))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer mongoClient.Disconnect(context.TODO())
+
+	notesCollection = mongoClient.Database("notesdb").Collection("notes")
+	chunksCollection = mongoClient.Database("notesdb").Collection("chunks")
+
+	conn, err := grpc.Dial(qdrantURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatal("Failed to connect to Qdrant:", err)
+	}
+	defer conn.Close()
+	
+	collectionsClient = pb.NewCollectionsClient(conn)
+	pointsClient = pb.NewPointsClient(conn)
+
+	genaiClient, err = genai.NewClient(context.Background(), option.WithAPIKey(geminiAPIKey))
+	if err != nil {
+		log.Fatal("Failed to create Gemini client:", err)
+	}
+	defer genaiClient.Close()
+
+	if err := initializeQdrant(); err != nil {
+		log.Fatal("Failed to initialize Qdrant:", err)
+	}
+
+	jobQueue = make(chan ProcessingJob, 100)
+	
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go processingWorker()
+	}
+
+	r := gin.Default()
+
+	r.Use(cors.New(cors.Config{
+		AllowAllOrigins:  true,
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Content-Length", "Accept-Encoding", "X-CSRF-Token", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: false,
+		MaxAge:           12 * time.Hour,
+	}))
+
+	r.GET("/notes", getNotes)
+	r.POST("/notes", createNote)
+	r.PUT("/notes/:id", updateNote)
+	r.DELETE("/notes/:id", deleteNote)
+	r.POST("/search", searchNotes)
+	r.POST("/ask", answerQuestion)
+	r.POST("/ai-question", askAIAboutNote)
+	r.POST("/summarize", summarizeNote)
+	r.GET("/categories", getCategories)
+	r.GET("/notes/category/:category", getNotesByCategory)
+	r.GET("/categories/stats", getCategoryStats)
+	r.POST("/migrate/classify", classifyExistingNotes)
+	r.POST("/migrate/titles", regenerateAllTitles)
+
+	log.Println("Server starting on :8080")
+	r.Run(":8080")
+}
+
+func initializeQdrant() error {
+	ctx := context.Background()
+	
+	collections, err := collectionsClient.List(ctx, &pb.ListCollectionsRequest{})
+	if err != nil {
+		return fmt.Errorf("failed to list collections: %w", err)
+	}
+
+	collectionExists := false
+	for _, collection := range collections.Collections {
+		if collection.Name == COLLECTION_NAME {
+			collectionExists = true
+			break
+		}
+	}
+
+	if !collectionExists {
+		log.Printf("Creating Qdrant collection: %s", COLLECTION_NAME)
+		_, err := collectionsClient.Create(ctx, &pb.CreateCollection{
+			CollectionName: COLLECTION_NAME,
+			VectorsConfig: &pb.VectorsConfig{
+				Config: &pb.VectorsConfig_Params{
+					Params: &pb.VectorParams{
+						Size:     EMBEDDING_DIM,
+						Distance: pb.Distance_Cosine,
+					},
+				},
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create collection: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func processingWorker() {
+	defer wg.Done()
+	
+	for job := range jobQueue {
+		if err := processNoteJob(job); err != nil {
+			log.Printf("Error processing job for note %s: %v", job.NoteID.Hex(), err)
+		}
+	}
+}
+
+func classifyNote(title, content string) (string, error) {
+	prompt := fmt.Sprintf(`
+Classify this note into exactly ONE of these categories: %s
+
+Note Title: %s
+Note Content: %s
+
+Rules:
+1. Return ONLY the category name, nothing else
+2. Choose the MOST relevant category
+3. If uncertain, use "other"
+4. Be consistent with similar content
+
+Category:`, strings.Join(CATEGORIES, ", "), title, content)
+
+	ctx := context.Background()
+	model := genaiClient.GenerativeModel(GENERATION_MODEL)
+	result, err := model.GenerateContent(ctx, genai.Text(prompt))
+	if err != nil {
+		return "", fmt.Errorf("failed to generate classification: %w", err)
+	}
+
+	if result == nil || len(result.Candidates) == 0 || result.Candidates[0].Content == nil {
+		return "", fmt.Errorf("no classification result returned")
+	}
+
+	category := strings.TrimSpace(strings.ToLower(string(result.Candidates[0].Content.Parts[0].(genai.Text))))
+	
+	// Validate category is in our list
+	for _, validCategory := range CATEGORIES {
+		if category == validCategory {
+			return category, nil
+		}
+	}
+	
+	// If not found, return "other"
+	return "other", nil
+}
+
+func processNoteJob(job ProcessingJob) error {
+	fullText := job.Title + "\n\n" + job.Content
+	
+	// 1. Classify the note (always do this, even for sensitive content)
+	category, err := classifyNote(job.Title, job.Content)
+	if err != nil {
+		log.Printf("Classification failed for note %s: %v", job.NoteID.Hex(), err)
+		category = "other" // fallback
+	}
+	
+	// 2. Check if this is YouTube content and auto-generate summary
+	isYouTube := false
+	if job.Metadata != nil {
+		if platform, exists := job.Metadata["platform"]; exists {
+			if platformStr, ok := platform.(string); ok && platformStr == "youtube" {
+				isYouTube = true
+			}
+		}
+	}
+	
+	updateFields := bson.M{"category": category}
+	
+	if isYouTube {
+		log.Printf("Auto-generating summary for YouTube note: %s", job.NoteID.Hex())
+		summary, err := generateSummary(job.Content)
+		if err != nil {
+			log.Printf("Failed to generate auto-summary for YouTube note %s: %v", job.NoteID.Hex(), err)
+		} else {
+			updateFields["summary"] = summary
+			log.Printf("Successfully generated auto-summary for YouTube note: %s", job.NoteID.Hex())
+		}
+	}
+	
+	// 3. Update note with category and summary (if applicable)
+	_, err = notesCollection.UpdateOne(
+		context.Background(),
+		bson.M{"_id": job.NoteID},
+		bson.M{"$set": updateFields},
+	)
+	if err != nil {
+		log.Printf("Failed to update note for %s: %v", job.NoteID.Hex(), err)
+	}
+	
+	// 4. Skip embedding if sensitive data detected
+	if containsSensitiveData(fullText) {
+		log.Printf("Skipping embedding for note %s: Sensitive data detected (API keys, passwords, etc.)", job.NoteID.Hex())
+		return nil // Not an error, just skip embedding for security
+	}
+	
+	words := strings.Fields(fullText)
+	
+	if len(words) > MAX_WORDS {
+		words = words[:MAX_WORDS]
+		fullText = strings.Join(words, " ")
+	}
+
+	chunks := chunkText(fullText, CHUNK_SIZE)
+	
+	for i, chunk := range chunks {
+		chunkDoc := NoteChunk{
+			NoteID:   job.NoteID,
+			Content:  chunk,
+			ChunkIdx: i,
+		}
+		
+		result, err := chunksCollection.InsertOne(context.Background(), chunkDoc)
+		if err != nil {
+			log.Printf("Error saving chunk: %v", err)
+			continue
+		}
+		
+		chunkID := result.InsertedID.(primitive.ObjectID)
+		
+		embedding, err := generateEmbedding(chunk)
+		if err != nil {
+			log.Printf("Error generating embedding: %v", err)
+			continue
+		}
+
+		if err := storeEmbedding(chunkID, job.NoteID, embedding); err != nil {
+			log.Printf("Error storing embedding: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func chunkText(text string, chunkSize int) []string {
+	words := strings.Fields(text)
+	var chunks []string
+	
+	for i := 0; i < len(words); i += chunkSize {
+		end := i + chunkSize
+		if end > len(words) {
+			end = len(words)
+		}
+		chunks = append(chunks, strings.Join(words[i:end], " "))
+	}
+	
+	return chunks
+}
+
+func containsSensitiveData(text string) bool {
+	// Common patterns for sensitive information
+	sensitivePatterns := []string{
+		// API Keys
+		`(?i)(api[_-]?key|apikey)\s*[:=]\s*[a-zA-Z0-9_-]{10,}`,
+		`sk-[a-zA-Z0-9]{32,}`,                    // OpenAI API keys
+		`AIza[a-zA-Z0-9_-]{35}`,                  // Google API keys  
+		`ya29\.[a-zA-Z0-9_-]+`,                   // Google OAuth tokens
+		`ghp_[a-zA-Z0-9]{36}`,                    // GitHub personal access tokens
+		`gho_[a-zA-Z0-9]{36}`,                    // GitHub OAuth tokens
+		
+		// Passwords
+		`(?i)(password|passwd|pwd)\s*[:=]\s*\S{6,}`,
+		`(?i)(pass|pw)\s*[:=]\s*['"]\S{6,}['"]`,
+		
+		// Secrets and Tokens
+		`(?i)(secret|token|auth)\s*[:=]\s*[a-zA-Z0-9_-]{10,}`,
+		`(?i)bearer\s+[a-zA-Z0-9_-]{10,}`,
+		`(?i)access[_-]?token\s*[:=]\s*[a-zA-Z0-9_-]{10,}`,
+		
+		// Database Connection Strings
+		`(?i)(mongodb|mysql|postgres|redis)://[^\s]+`,
+		`(?i)connection[_-]?string\s*[:=]\s*[^\s;]+`,
+		
+		// Private Keys (basic detection)
+		`-----BEGIN [A-Z\s]+ PRIVATE KEY-----`,
+		`(?i)private[_-]?key\s*[:=]\s*[a-zA-Z0-9+/=]{20,}`,
+		
+		// Common service tokens
+		`xoxb-[a-zA-Z0-9-]+`,                     // Slack bot tokens
+		`xoxp-[a-zA-Z0-9-]+`,                     // Slack user tokens
+	}
+	
+	for _, pattern := range sensitivePatterns {
+		matched, err := regexp.MatchString(pattern, text)
+		if err != nil {
+			log.Printf("Error matching pattern %s: %v", pattern, err)
+			continue
+		}
+		if matched {
+			return true
+		}
+	}
+	
+	return false
+}
+
+func generateEmbedding(text string) ([]float32, error) {
+	ctx := context.Background()
+	
+	model := genaiClient.EmbeddingModel(EMBEDDING_MODEL)
+	
+	result, err := model.EmbedContent(ctx, genai.Text(text))
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate embedding: %w", err)
+	}
+
+	if result == nil || result.Embedding == nil || len(result.Embedding.Values) == 0 {
+		return nil, fmt.Errorf("no embedding returned")
+	}
+
+	return result.Embedding.Values, nil
+}
+
+func storeEmbedding(chunkID, noteID primitive.ObjectID, embedding []float32) error {
+	ctx := context.Background()
+
+	point := &pb.PointStruct{
+		Id: &pb.PointId{
+			PointIdOptions: &pb.PointId_Num{
+				Num: uint64(time.Now().UnixNano()), // Use timestamp as unique ID
+			},
+		},
+		Vectors: &pb.Vectors{
+			VectorsOptions: &pb.Vectors_Vector{
+				Vector: &pb.Vector{Data: embedding},
+			},
+		},
+		Payload: map[string]*pb.Value{
+			"chunk_id": {Kind: &pb.Value_StringValue{StringValue: chunkID.Hex()}},
+			"note_id":  {Kind: &pb.Value_StringValue{StringValue: noteID.Hex()}},
+		},
+	}
+
+	_, err := pointsClient.Upsert(ctx, &pb.UpsertPoints{
+		CollectionName: COLLECTION_NAME,
+		Points:         []*pb.PointStruct{point},
+	})
+
+	return err
+}
+
+func getNotes(c *gin.Context) {
+	cursor, err := notesCollection.Find(context.TODO(), bson.D{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer cursor.Close(context.TODO())
+
+	var notes []Note
+	if err = cursor.All(context.TODO(), &notes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if notes == nil {
+		notes = []Note{}
+	}
+
+	c.JSON(http.StatusOK, notes)
+}
+
+type CreateNoteRequest struct {
+	Content  string                 `json:"content" binding:"required"`
+	Title    string                 `json:"title,omitempty"`    // Optional, will be auto-generated if empty
+	Metadata map[string]interface{} `json:"metadata"`           // Optional, for social media metadata
+}
+
+func createNote(c *gin.Context) {
+	log.Printf("=== CREATE NOTE FUNCTION CALLED ===")
+	
+	var req CreateNoteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("JSON binding error: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.Printf("Request parsed: Content=%s, Metadata=%+v", req.Content, req.Metadata)
+	log.Printf("Metadata is nil: %t", req.Metadata == nil)
+	log.Printf("Metadata length: %d", len(req.Metadata))
+
+	// Generate title if not provided
+	title := req.Title
+	if title == "" {
+		generatedTitle, err := generateTitle(req.Content)
+		if err != nil {
+			log.Printf("Failed to generate title: %v", err)
+			title = "Untitled Note" // fallback
+		} else {
+			title = generatedTitle
+		}
+	}
+
+	// Initialize metadata if nil
+	metadata := req.Metadata
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+
+	note := Note{
+		Title:    title,
+		Content:  req.Content,
+		Created:  time.Now(),
+		Metadata: metadata,
+	}
+
+	result, err := notesCollection.InsertOne(context.TODO(), note)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	note.ID = result.InsertedID.(primitive.ObjectID)
+	
+	job := ProcessingJob{
+		NoteID:   note.ID,
+		Title:    note.Title,
+		Content:  note.Content,
+		Metadata: note.Metadata,
+	}
+	
+	select {
+	case jobQueue <- job:
+		log.Printf("Queued embedding job for note: %s", note.ID.Hex())
+	default:
+		log.Printf("Job queue full, skipping embedding for note: %s", note.ID.Hex())
+	}
+
+	c.JSON(http.StatusCreated, note)
+}
+
+type UpdateNoteRequest struct {
+	Content string `json:"content" binding:"required"`
+}
+
+func updateNote(c *gin.Context) {
+	noteID := c.Param("id")
+	
+	objID, err := primitive.ObjectIDFromHex(noteID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid note ID"})
+		return
+	}
+	
+	var req UpdateNoteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	
+	// Find the existing note first
+	var existingNote Note
+	err = notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&existingNote)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Note not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find note"})
+		}
+		return
+	}
+	
+	// Generate new title from content
+	newTitle, err := generateTitle(req.Content)
+	if err != nil {
+		log.Printf("Failed to generate title for updated note: %v", err)
+		newTitle = "Updated Note" // fallback
+	}
+	
+	// Update the note
+	update := bson.M{
+		"$set": bson.M{
+			"title":   newTitle,
+			"content": req.Content,
+		},
+	}
+	
+	_, err = notesCollection.UpdateOne(context.Background(), bson.M{"_id": objID}, update)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update note"})
+		return
+	}
+	
+	// Get the updated note
+	var updatedNote Note
+	err = notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&updatedNote)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve updated note"})
+		return
+	}
+	
+	// Queue re-processing job for embeddings and classification
+	job := ProcessingJob{
+		NoteID:   updatedNote.ID,
+		Title:    updatedNote.Title,
+		Content:  updatedNote.Content,
+		Metadata: updatedNote.Metadata,
+	}
+	
+	select {
+	case jobQueue <- job:
+		log.Printf("Queued re-processing job for updated note: %s", updatedNote.ID.Hex())
+	default:
+		log.Printf("Job queue full, skipping re-processing for updated note: %s", updatedNote.ID.Hex())
+	}
+	
+	c.JSON(http.StatusOK, updatedNote)
+}
+
+func deleteNote(c *gin.Context) {
+	noteID := c.Param("id")
+	
+	objID, err := primitive.ObjectIDFromHex(noteID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid note ID"})
+		return
+	}
+	
+	// Check if note exists
+	var existingNote Note
+	err = notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&existingNote)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Note not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find note"})
+		}
+		return
+	}
+	
+	// Delete note from MongoDB
+	_, err = notesCollection.DeleteOne(context.Background(), bson.M{"_id": objID})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete note"})
+		return
+	}
+	
+	// Delete associated chunks from MongoDB
+	_, err = chunksCollection.DeleteMany(context.Background(), bson.M{"note_id": objID})
+	if err != nil {
+		log.Printf("Failed to delete chunks for note %s: %v", noteID, err)
+		// Don't fail the request, just log the error
+	}
+	
+	// TODO: Delete embeddings from Qdrant (would require additional logic to find points by note_id)
+	// For now, we'll leave the embeddings as they won't match any existing notes
+	
+	c.JSON(http.StatusOK, gin.H{"message": "Note deleted successfully"})
+}
+
+func searchNotes(c *gin.Context) {
+	var req SearchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.Limit <= 0 {
+		req.Limit = 10
+	}
+
+	queryEmbedding, err := generateEmbedding(req.Query)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate embedding for query"})
+		return
+	}
+
+	searchResult, err := pointsClient.Search(context.Background(), &pb.SearchPoints{
+		CollectionName: COLLECTION_NAME,
+		Vector:         queryEmbedding,
+		Limit:          uint64(req.Limit * 2),
+		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Search failed"})
+		return
+	}
+
+	noteScores := make(map[string]float32)
+	noteIDs := make(map[string]bool)
+
+	for _, point := range searchResult.Result {
+		noteIDStr := point.Payload["note_id"].GetStringValue()
+		score := point.Score
+		
+		if existingScore, exists := noteScores[noteIDStr]; !exists || score > existingScore {
+			noteScores[noteIDStr] = score
+		}
+		noteIDs[noteIDStr] = true
+	}
+
+	var objectIDs []primitive.ObjectID
+	for noteIDStr := range noteIDs {
+		if objID, err := primitive.ObjectIDFromHex(noteIDStr); err == nil {
+			objectIDs = append(objectIDs, objID)
+		}
+	}
+
+	if len(objectIDs) == 0 {
+		c.JSON(http.StatusOK, []SearchResult{})
+		return
+	}
+
+	cursor, err := notesCollection.Find(context.Background(), bson.M{"_id": bson.M{"$in": objectIDs}})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch notes"})
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	var notes []Note
+	if err = cursor.All(context.Background(), &notes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode notes"})
+		return
+	}
+
+	var results []SearchResult
+	for _, note := range notes {
+		score := noteScores[note.ID.Hex()]
+		
+		// Only include results above the minimum relevance threshold
+		if score >= MIN_RELEVANCE_SCORE {
+			results = append(results, SearchResult{
+				Note:  note,
+				Score: score,
+			})
+		}
+	}
+
+	// Sort results by score in descending order (highest relevance first)
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	// Apply limit after filtering and sorting
+	if len(results) > req.Limit {
+		results = results[:req.Limit]
+	}
+
+	c.JSON(http.StatusOK, results)
+}
+
+type CategoryCount struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+func getCategories(c *gin.Context) {
+	pipeline := []bson.M{
+		{
+			"$group": bson.M{
+				"_id":   "$category",
+				"count": bson.M{"$sum": 1},
+			},
+		},
+		{
+			"$sort": bson.M{"count": -1},
+		},
+	}
+
+	cursor, err := notesCollection.Aggregate(context.Background(), pipeline)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to aggregate categories"})
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	var results []CategoryCount
+	for cursor.Next(context.Background()) {
+		var result struct {
+			ID    string `bson:"_id"`
+			Count int    `bson:"count"`
+		}
+		if err := cursor.Decode(&result); err != nil {
+			continue
+		}
+		
+		// Skip empty categories
+		if result.ID != "" {
+			results = append(results, CategoryCount{
+				Name:  result.ID,
+				Count: result.Count,
+			})
+		}
+	}
+
+	// Add categories with 0 notes
+	existingCategories := make(map[string]bool)
+	for _, result := range results {
+		existingCategories[result.Name] = true
+	}
+	
+	for _, category := range CATEGORIES {
+		if !existingCategories[category] {
+			results = append(results, CategoryCount{
+				Name:  category,
+				Count: 0,
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, results)
+}
+
+func getNotesByCategory(c *gin.Context) {
+	category := c.Param("category")
+	
+	// Validate category
+	validCategory := false
+	for _, validCat := range CATEGORIES {
+		if category == validCat {
+			validCategory = true
+			break
+		}
+	}
+	
+	if !validCategory {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category"})
+		return
+	}
+
+	// Sort by created date (newest first)
+	opts := options.Find().SetSort(bson.M{"created": -1})
+	cursor, err := notesCollection.Find(context.Background(), bson.M{"category": category}, opts)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch notes"})
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	var notes []Note
+	if err = cursor.All(context.Background(), &notes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode notes"})
+		return
+	}
+
+	if notes == nil {
+		notes = []Note{}
+	}
+
+	c.JSON(http.StatusOK, notes)
+}
+
+func getCategoryStats(c *gin.Context) {
+	pipeline := []bson.M{
+		{
+			"$group": bson.M{
+				"_id":   "$category",
+				"count": bson.M{"$sum": 1},
+			},
+		},
+		{
+			"$sort": bson.M{"count": -1},
+		},
+	}
+
+	cursor, err := notesCollection.Aggregate(context.Background(), pipeline)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get category stats"})
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	var categoryStats []CategoryCount
+	totalNotes := 0
+	
+	for cursor.Next(context.Background()) {
+		var result struct {
+			ID    string `bson:"_id"`
+			Count int    `bson:"count"`
+		}
+		if err := cursor.Decode(&result); err != nil {
+			continue
+		}
+		
+		if result.ID != "" {
+			categoryStats = append(categoryStats, CategoryCount{
+				Name:  result.ID,
+				Count: result.Count,
+			})
+			totalNotes += result.Count
+		}
+	}
+
+	response := gin.H{
+		"categories": categoryStats,
+		"total_notes": totalNotes,
+		"total_categories": len(CATEGORIES),
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func classifyExistingNotes(c *gin.Context) {
+	// Find notes without category or with empty category
+	cursor, err := notesCollection.Find(context.Background(), bson.M{
+		"$or": []bson.M{
+			{"category": bson.M{"$exists": false}},
+			{"category": ""},
+		},
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find notes"})
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	var notes []Note
+	if err = cursor.All(context.Background(), &notes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode notes"})
+		return
+	}
+
+	classified := 0
+	errors := 0
+
+	for _, note := range notes {
+		category, err := classifyNote(note.Title, note.Content)
+		if err != nil {
+			log.Printf("Failed to classify note %s: %v", note.ID.Hex(), err)
+			category = "other"
+			errors++
+		}
+
+		_, err = notesCollection.UpdateOne(
+			context.Background(),
+			bson.M{"_id": note.ID},
+			bson.M{"$set": bson.M{"category": category}},
+		)
+		if err != nil {
+			log.Printf("Failed to update note %s with category: %v", note.ID.Hex(), err)
+			errors++
+		} else {
+			classified++
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Classification complete",
+		"classified": classified,
+		"errors": errors,
+		"total": len(notes),
+	})
+}
+
+func answerQuestion(c *gin.Context) {
+	var req QuestionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Step 1: Search for relevant notes using semantic search
+	queryEmbedding, err := generateEmbedding(req.Question)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate embedding for question"})
+		return
+	}
+
+	searchResult, err := pointsClient.Search(context.Background(), &pb.SearchPoints{
+		CollectionName: COLLECTION_NAME,
+		Vector:         queryEmbedding,
+		Limit:          uint64(5), // Get top 5 most relevant notes
+		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Search failed"})
+		return
+	}
+
+	// Step 2: Get relevant notes and prepare context
+	var relevantNotes []SearchResult
+	var contextText strings.Builder
+	noteIDs := make(map[string]bool)
+
+	for _, point := range searchResult.Result {
+		noteIDStr := point.Payload["note_id"].GetStringValue()
+		score := point.Score
+		
+		// Only include highly relevant notes (higher threshold for Q&A)
+		if score >= 0.4 && !noteIDs[noteIDStr] {
+			if objID, err := primitive.ObjectIDFromHex(noteIDStr); err == nil {
+				var note Note
+				err := notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&note)
+				if err == nil {
+					relevantNotes = append(relevantNotes, SearchResult{
+						Note:  note,
+						Score: score,
+					})
+					
+					// Add to context with clear delineation
+					contextText.WriteString(fmt.Sprintf("Title: %s\nContent: %s\n\n", note.Title, note.Content))
+					noteIDs[noteIDStr] = true
+				}
+			}
+		}
+	}
+
+	if len(relevantNotes) == 0 {
+		c.JSON(http.StatusOK, QuestionResponse{
+			Answer:   "I couldn't find any relevant information in your notes to answer that question.",
+			Sources:  []SearchResult{},
+			Question: req.Question,
+		})
+		return
+	}
+
+	// Step 3: Generate answer using relevant context
+	answer, err := generateAnswer(req.Question, contextText.String())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate answer"})
+		return
+	}
+
+	c.JSON(http.StatusOK, QuestionResponse{
+		Answer:   answer,
+		Sources:  relevantNotes,
+		Question: req.Question,
+	})
+}
+
+func generateAnswer(question, contextText string) (string, error) {
+	prompt := fmt.Sprintf(`You are an AI assistant helping someone understand their personal notes. Based on the provided context from their notes, answer their question in a helpful and conversational way.
+
+Context from their notes:
+%s
+
+Question: %s
+
+Instructions:
+1. Answer based ONLY on the information provided in the context
+2. Be conversational and helpful
+3. If the context doesn't contain enough information, say so politely
+4. Reference specific notes when relevant (e.g., "According to your note about...")
+5. Keep the answer concise but complete
+
+Answer:`, contextText, question)
+
+	ctx := context.Background()
+	model := genaiClient.GenerativeModel(GENERATION_MODEL)
+	result, err := model.GenerateContent(ctx, genai.Text(prompt))
+	if err != nil {
+		return "", fmt.Errorf("failed to generate answer: %w", err)
+	}
+
+	if result == nil || len(result.Candidates) == 0 || result.Candidates[0].Content == nil {
+		return "", fmt.Errorf("no answer generated")
+	}
+
+	answer := strings.TrimSpace(string(result.Candidates[0].Content.Parts[0].(genai.Text)))
+	return answer, nil
+}
+
+func generateTitle(content string) (string, error) {
+	// Get first 500 characters for title generation to avoid token limits
+	excerpt := content
+	if len(content) > 500 {
+		excerpt = content[:500] + "..."
+	}
+
+	prompt := fmt.Sprintf(`Generate a concise, descriptive title for this note content. The title should:
+
+1. Be accurate and specific to the content
+2. Be 2-10 words maximum
+3. Capture the main topic/theme
+4. Be clear and searchable
+5. NOT include quotation marks or special formatting
+
+Content:
+%s
+
+Title:`, excerpt)
+
+	ctx := context.Background()
+	model := genaiClient.GenerativeModel(GENERATION_MODEL)
+	result, err := model.GenerateContent(ctx, genai.Text(prompt))
+	if err != nil {
+		return "", fmt.Errorf("failed to generate title: %w", err)
+	}
+
+	if result == nil || len(result.Candidates) == 0 || result.Candidates[0].Content == nil {
+		return "", fmt.Errorf("no title generated")
+	}
+
+	title := strings.TrimSpace(string(result.Candidates[0].Content.Parts[0].(genai.Text)))
+	
+	// Clean up the title (remove quotes, ensure reasonable length)
+	title = strings.Trim(title, "\"'")
+	if len(title) > 100 {
+		title = title[:100]
+	}
+	if title == "" {
+		title = "Untitled Note"
+	}
+	
+	return title, nil
+}
+
+func askAIAboutNote(c *gin.Context) {
+	var req AIQuestionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Create a combined prompt with the user's question and the note content
+	fullPrompt := fmt.Sprintf(`%s
+
+Content to analyze:
+%s`, req.Prompt, req.Content)
+
+	// Use Gemini to generate a response
+	ctx := context.Background()
+	model := genaiClient.GenerativeModel(GENERATION_MODEL)
+	result, err := model.GenerateContent(ctx, genai.Text(fullPrompt))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate AI response"})
+		return
+	}
+
+	if result == nil || len(result.Candidates) == 0 || result.Candidates[0].Content == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "No response generated"})
+		return
+	}
+
+	response := strings.TrimSpace(string(result.Candidates[0].Content.Parts[0].(genai.Text)))
+	
+	c.JSON(http.StatusOK, AIQuestionResponse{
+		Response: response,
+	})
+}
+
+func summarizeNote(c *gin.Context) {
+	var req SummarizeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Convert note ID from string to ObjectID
+	objID, err := primitive.ObjectIDFromHex(req.NoteId)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid note ID"})
+		return
+	}
+
+	// Generate summary using Gemini
+	summary, err := generateSummary(req.Content)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate summary"})
+		return
+	}
+
+	// Update the note in the database with the summary
+	_, err = notesCollection.UpdateOne(
+		context.Background(),
+		bson.M{"_id": objID},
+		bson.M{"$set": bson.M{"summary": summary}},
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save summary"})
+		return
+	}
+
+	c.JSON(http.StatusOK, SummarizeResponse{
+		Summary: summary,
+	})
+}
+
+func generateSummary(content string) (string, error) {
+	prompt := fmt.Sprintf(`Please provide a concise and well-formatted summary of the following content. The summary should:
+
+1. Be concise and to-the-point - avoid unnecessary words
+2. If the content includes lists or multiple points, clearly outline each point with bullet points or numbered lists
+3. Use proper spacing with line breaks between different sections or topics
+4. Structure the information logically with clear paragraphs
+5. Capture the key takeaways and main ideas
+6. If there are actionable items or recommendations, list them clearly
+7. Maintain the essential context but eliminate redundancy
+
+Format your response with:
+- Clear paragraph breaks between different topics
+- Bullet points (•) or numbered lists when covering multiple items
+- Proper spacing for readability
+
+Content to summarize:
+%s
+
+Summary:`, content)
+
+	ctx := context.Background()
+	model := genaiClient.GenerativeModel(GENERATION_MODEL)
+	result, err := model.GenerateContent(ctx, genai.Text(prompt))
+	if err != nil {
+		return "", fmt.Errorf("failed to generate summary: %w", err)
+	}
+
+	if result == nil || len(result.Candidates) == 0 || result.Candidates[0].Content == nil {
+		return "", fmt.Errorf("no summary generated")
+	}
+
+	summary := strings.TrimSpace(string(result.Candidates[0].Content.Parts[0].(genai.Text)))
+	return summary, nil
+}
+
+func regenerateAllTitles(c *gin.Context) {
+	// Find all notes
+	cursor, err := notesCollection.Find(context.Background(), bson.M{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find notes"})
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	var notes []Note
+	if err = cursor.All(context.Background(), &notes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode notes"})
+		return
+	}
+
+	regenerated := 0
+	errors := 0
+
+	for _, note := range notes {
+		newTitle, err := generateTitle(note.Content)
+		if err != nil {
+			log.Printf("Failed to generate title for note %s: %v", note.ID.Hex(), err)
+			errors++
+			continue
+		}
+
+		_, err = notesCollection.UpdateOne(
+			context.Background(),
+			bson.M{"_id": note.ID},
+			bson.M{"$set": bson.M{"title": newTitle}},
+		)
+		if err != nil {
+			log.Printf("Failed to update title for note %s: %v", note.ID.Hex(), err)
+			errors++
+		} else {
+			regenerated++
+			log.Printf("Updated title for note %s: %s -> %s", note.ID.Hex(), note.Title, newTitle)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Title regeneration complete",
+		"regenerated": regenerated,
+		"errors": errors,
+		"total": len(notes),
+	})
+}

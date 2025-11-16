@@ -1,0 +1,135 @@
+/* Social Media Note Saver - Styles */
+
+.social-save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid rgb(207, 217, 222);
+  border-radius: 16px;
+  color: rgb(83, 100, 113);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-left: 8px;
+  height: 32px;
+  min-width: 60px;
+  font-family: inherit;
+}
+
+.social-save-btn:hover {
+  background-color: rgba(29, 155, 240, 0.1);
+  border-color: rgb(29, 155, 240);
+  color: rgb(29, 155, 240);
+}
+
+.social-save-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.social-save-btn.success {
+  background-color: rgba(0, 186, 124, 0.1);
+  border-color: rgb(0, 186, 124);
+  color: rgb(0, 186, 124);
+}
+
+.social-save-btn.error {
+  background-color: rgba(244, 33, 46, 0.1);
+  border-color: rgb(244, 33, 46);
+  color: rgb(244, 33, 46);
+}
+
+.social-save-btn svg {
+  flex-shrink: 0;
+}
+
+.social-save-btn .spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Dark mode support */
+[data-theme="dark"] .social-save-btn,
+.social-save-btn[data-theme="dark"],
+html[data-theme="dark"] .social-save-btn {
+  border-color: rgb(83, 100, 113);
+  color: rgb(231, 233, 234);
+}
+
+[data-theme="dark"] .social-save-btn:hover,
+.social-save-btn[data-theme="dark"]:hover,
+html[data-theme="dark"] .social-save-btn:hover {
+  background-color: rgba(29, 155, 240, 0.1);
+  border-color: rgb(29, 155, 240);
+  color: rgb(29, 155, 240);
+}
+
+/* Fallback for our own action container */
+.social-saver-actions {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgb(239, 243, 244);
+  display: flex;
+  align-items: center;
+}
+
+[data-theme="dark"] .social-saver-actions,
+.social-saver-actions[data-theme="dark"],
+html[data-theme="dark"] .social-saver-actions {
+  border-top-color: rgb(47, 51, 54);
+}
+
+/* LinkedIn-specific styling */
+body[data-platform="linkedin"] .social-save-btn,
+.social-save-btn[data-platform="linkedin"] {
+  background: transparent;
+  border: none;
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: 2px;
+  transition: background-color 0.15s ease;
+}
+
+body[data-platform="linkedin"] .social-save-btn:hover,
+.social-save-btn[data-platform="linkedin"]:hover {
+  background-color: rgba(0, 0, 0, 0.08);
+  color: rgba(0, 0, 0, 0.9);
+}
+
+body[data-platform="linkedin"] .social-save-btn.success,
+.social-save-btn[data-platform="linkedin"].success {
+  background-color: rgba(0, 135, 202, 0.1);
+  color: rgb(0, 135, 202);
+}
+
+body[data-platform="linkedin"] .social-save-btn.error,
+.social-save-btn[data-platform="linkedin"].error {
+  background-color: rgba(212, 42, 42, 0.1);
+  color: rgb(212, 42, 42);
+}
+
+/* Responsive adjustments */
+@media (max-width: 500px) {
+  .social-save-btn {
+    padding: 4px 8px;
+    font-size: 12px;
+    min-width: 50px;
+  }
+  
+  .social-save-btn span {
+    display: none;
+  }
+}

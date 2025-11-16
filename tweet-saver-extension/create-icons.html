@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generate Extension Icons</title>
+</head>
+<body>
+    <canvas id="canvas" width="128" height="128" style="border: 1px solid #ccc;"></canvas>
+    <br><br>
+    <button onclick="downloadIcon(16)">Download 16x16</button>
+    <button onclick="downloadIcon(32)">Download 32x32</button>
+    <button onclick="downloadIcon(48)">Download 48x48</button>
+    <button onclick="downloadIcon(128)">Download 128x128</button>
+
+    <script>
+        function createIcon(size) {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            
+            // Background
+            ctx.fillStyle = '#1d9bf0';
+            ctx.fillRect(0, 0, size, size);
+            
+            // Bookmark icon (simplified)
+            const padding = size * 0.2;
+            const bookmarkWidth = size - (padding * 2);
+            const bookmarkHeight = size - (padding * 2);
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(padding, padding, bookmarkWidth, bookmarkHeight * 0.8);
+            
+            // Bookmark point
+            ctx.beginPath();
+            ctx.moveTo(padding, padding + bookmarkHeight * 0.8);
+            ctx.lineTo(padding + bookmarkWidth, padding + bookmarkHeight * 0.8);
+            ctx.lineTo(padding + bookmarkWidth / 2, padding + bookmarkHeight);
+            ctx.closePath();
+            ctx.fill();
+            
+            return canvas;
+        }
+        
+        function downloadIcon(size) {
+            const canvas = createIcon(size);
+            const link = document.createElement('a');
+            link.download = `icon${size}.png`;
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+        
+        // Draw preview
+        const previewCanvas = document.getElementById('canvas');
+        const ctx = previewCanvas.getContext('2d');
+        const iconCanvas = createIcon(128);
+        ctx.drawImage(iconCanvas, 0, 0);
+    </script>
+</body>
+</html>
