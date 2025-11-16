@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Create PNG Icons</title>
+</head>
+<body>
+    <h2>Tweet Note Saver - Icon Generator</h2>
+    <p>This page will generate PNG icons for the extension. Click the buttons below to download each size.</p>
+    
+    <div id="previews"></div>
+    
+    <div style="margin: 20px 0;">
+        <button onclick="downloadAll()">Download All Icons</button>
+    </div>
+    
+    <div id="instructions">
+        <h3>Instructions:</h3>
+        <ol>
+            <li>Click "Download All Icons" or individual download buttons</li>
+            <li>Save the downloaded files to the <code>icons/</code> folder</li>
+            <li>Make sure the files are named exactly: <code>icon16.png</code>, <code>icon32.png</code>, <code>icon48.png</code>, <code>icon128.png</code></li>
+        </ol>
+    </div>
+
+    <script>
+        function createIcon(size) {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            
+            // Background with rounded corners
+            const radius = size * 0.15;
+            ctx.fillStyle = '#1d9bf0';
+            ctx.beginPath();
+            ctx.roundRect(0, 0, size, size, radius);
+            ctx.fill();
+            
+            // Bookmark shape
+            const padding = size * 0.25;
+            const bookmarkWidth = size * 0.5;
+            const bookmarkHeight = size * 0.5;
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.moveTo(padding, padding);
+            ctx.lineTo(padding + bookmarkWidth, padding);
+            ctx.lineTo(padding + bookmarkWidth, padding + bookmarkHeight * 0.75);
+            ctx.lineTo(padding + bookmarkWidth / 2, padding + bookmarkHeight);
+            ctx.lineTo(padding, padding + bookmarkHeight * 0.75);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Small decorative dots
+            ctx.fillStyle = '#1d9bf0';
+            const dotSize = size * 0.03;
+            ctx.beginPath();
+            ctx.arc(padding + bookmarkWidth * 0.3, padding + bookmarkHeight * 0.3, dotSize, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            ctx.beginPath();
+            ctx.arc(padding + bookmarkWidth * 0.7, padding + bookmarkHeight * 0.3, dotSize, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            return canvas;
+        }
+        
+        function downloadIcon(size) {
+            const canvas = createIcon(size);
+            const link = document.createElement('a');
+            link.download = `icon${size}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+        
+        function downloadAll() {
+            [16, 32, 48, 128].forEach(size => {
+                setTimeout(() => downloadIcon(size), 100 * size);
+            });
+        }
+        
+        // Add roundRect if not supported
+        if (!CanvasRenderingContext2D.prototype.roundRect) {
+            CanvasRenderingContext2D.prototype.roundRect = function(x, y, width, height, radius) {
+                this.moveTo(x + radius, y);
+                this.lineTo(x + width - radius, y);
+                this.arcTo(x + width, y, x + width, y + radius, radius);
+                this.lineTo(x + width, y + height - radius);
+                this.arcTo(x + width, y + height, x + width - radius, y + height, radius);
+                this.lineTo(x + radius, y + height);
+                this.arcTo(x, y + height, x, y + height - radius, radius);
+                this.lineTo(x, y + radius);
+                this.arcTo(x, y, x + radius, y, radius);
+            };
+        }
+        
+        // Create previews
+        const previewsDiv = document.getElementById('previews');
+        [16, 32, 48, 128].forEach(size => {
+            const container = document.createElement('div');
+            container.style.cssText = 'display: inline-block; margin: 10px; text-align: center; vertical-align: top;';
+            
+            const canvas = createIcon(size);
+            canvas.style.cssText = 'border: 1px solid #ccc; margin-bottom: 5px; display: block;';
+            
+            const button = document.createElement('button');
+            button.textContent = `Download ${size}x${size}`;
+            button.onclick = () => downloadIcon(size);
+            
+            const label = document.createElement('div');
+            label.textContent = `${size}x${size}`;
+            label.style.cssText = 'font-size: 12px; color: #666; margin-bottom: 5px;';
+            
+            container.appendChild(label);
+            container.appendChild(canvas);
+            container.appendChild(button);
+            previewsDiv.appendChild(container);
+        });
+    </script>
+</body>
+</html>
