@@ -7,6 +7,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   const saveConfigButton = document.getElementById('saveConfig');
   const testAPIButton = document.getElementById('testAPI');
   const statusDiv = document.getElementById('status');
+  const channelUrlInput = document.getElementById('channelUrl');
+  const videoLimitSelect = document.getElementById('videoLimit');
+  const importChannelButton = document.getElementById('importChannel');
+  const importStatusDiv = document.getElementById('importStatus');
 
   // Load current configuration
   await loadConfig();
@@ -15,6 +19,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   extensionEnabledToggle.addEventListener('change', toggleExtension);
   saveConfigButton.addEventListener('click', saveConfig);
   testAPIButton.addEventListener('click', testAPI);
+  importChannelButton.addEventListener('click', startChannelImport);
+
+  // Listen for progress updates from background script
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === 'importProgress') {
+      handleImportProgress(message);
+    }
+  });
 
   async function loadConfig() {
     try {
@@ -238,6 +250,112 @@ document.addEventListener('DOMContentLoaded', async () => {
       setTimeout(() => {
         statusDiv.style.display = 'none';
       }, 3000);
+    }
+  }
+
+  async function startChannelImport() {
+    try {
+      const channelUrl = channelUrlInput.value.trim();
+      const limit = parseInt(videoLimitSelect.value);
+
+      // Validate input
+      if (!channelUrl) {
+        showImportStatus('Please enter a YouTube channel URL', 'error');
+        return;
+      }
+
+      // Validate URL
+      try {
+        const url = new URL(channelUrl);
+        if (!url.hostname.includes('youtube.com')) {
+          showImportStatus('Please enter a valid YouTube channel URL', 'error');
+          return;
+        }
+      } catch {
+        showImportStatus('Please enter a valid URL', 'error');
+        return;
+      }
+
+      // Disable button during import
+      importChannelButton.disabled = true;
+      importChannelButton.textContent = 'Importing...';
+
+      // Show initial status with progress bar
+      importStatusDiv.innerHTML = `
+        <div class="status info">
+          <div>Starting import...</div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+          </div>
+        </div>
+      `;
+      importStatusDiv.style.display = 'block';
+
+      // Send message to background script
+      chrome.runtime.sendMessage({
+        action: 'importChannel',
+        channelUrl: channelUrl,
+        limit: limit
+      });
+
+    } catch (error) {
+      showImportStatus('Error starting import: ' + error.message, 'error');
+      importChannelButton.disabled = false;
+      importChannelButton.textContent = 'Import Transcripts';
+    }
+  }
+
+  function handleImportProgress(message) {
+    const { current, total, status, videoTitle, completed, error } = message;
+
+    if (completed) {
+      // Import finished
+      importChannelButton.disabled = false;
+      importChannelButton.textContent = 'Import Transcripts';
+
+      if (error) {
+        showImportStatus(`Import completed with errors: ${error}`, 'error');
+      } else {
+        showImportStatus(`✅ Successfully imported ${current} of ${total} videos!`, 'success');
+      }
+      return;
+    }
+
+    // Update progress
+    const percentage = total > 0 ? (current / total) * 100 : 0;
+    const progressFill = document.getElementById('progressFill');
+
+    if (progressFill) {
+      progressFill.style.width = `${percentage}%`;
+    }
+
+    // Update status text
+    let statusText = `Processing video ${current} of ${total}`;
+    if (videoTitle) {
+      statusText += `: ${videoTitle}`;
+    }
+    if (status) {
+      statusText += ` - ${status}`;
+    }
+
+    importStatusDiv.innerHTML = `
+      <div class="status info">
+        <div>${statusText}</div>
+        <div class="progress-bar">
+          <div class="progress-fill" style="width: ${percentage}%"></div>
+        </div>
+      </div>
+    `;
+  }
+
+  function showImportStatus(message, type) {
+    importStatusDiv.innerHTML = `<div class="status ${type}">${message}</div>`;
+    importStatusDiv.style.display = 'block';
+
+    if (type === 'success') {
+      setTimeout(() => {
+        importStatusDiv.style.display = 'none';
+      }, 5000);
     }
   }
 });
