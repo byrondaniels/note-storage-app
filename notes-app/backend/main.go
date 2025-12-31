@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -85,6 +86,13 @@ type ProcessingJob struct {
 	Title    string
 	Content  string
 	Metadata map[string]interface{}
+}
+
+// NoteAnalysis holds the combined AI analysis result
+type NoteAnalysis struct {
+	Title    string `json:"title"`
+	Category string `json:"category"`
+	Summary  string `json:"summary"`
 }
 
 var (
@@ -302,91 +310,138 @@ Category:`, strings.Join(CATEGORIES, ", "), title, content)
 	}
 
 	category := strings.TrimSpace(strings.ToLower(string(result.Candidates[0].Content.Parts[0].(genai.Text))))
-	
+
 	// Validate category is in our list
 	for _, validCategory := range CATEGORIES {
 		if category == validCategory {
 			return category, nil
 		}
 	}
-	
+
 	// If not found, return "other"
 	return "other", nil
 }
 
+// analyzeNote performs title generation, classification, and summary in a single API call
+func analyzeNote(content string, includeSummary bool) (*NoteAnalysis, error) {
+	// Get first 2000 characters for analysis to avoid token limits while keeping enough context
+	excerpt := content
+	if len(content) > 2000 {
+		excerpt = content[:2000] + "..."
+	}
+
+	summaryInstruction := ""
+	summaryField := `"summary": ""`
+	if includeSummary {
+		summaryInstruction = `4. "summary": A concise summary (2-4 sentences) capturing the key points and main takeaways`
+		summaryField = `"summary": "your summary here"`
+	}
+
+	prompt := fmt.Sprintf(`Analyze this note and return a JSON object with the following fields:
+
+1. "title": A concise, descriptive title (2-10 words, no quotes or special formatting)
+2. "category": Exactly ONE category from this list: %s
+3. Choose the MOST relevant category. If uncertain, use "other"
+%s
+
+IMPORTANT: Return ONLY valid JSON, no markdown formatting, no code blocks, just the raw JSON object.
+
+Content to analyze:
+%s
+
+Return this exact JSON structure:
+{"title": "your title here", "category": "category-name", %s}`,
+		strings.Join(CATEGORIES, ", "),
+		summaryInstruction,
+		excerpt,
+		summaryField)
+
+	ctx := context.Background()
+	model := genaiClient.GenerativeModel(GENERATION_MODEL)
+	result, err := model.GenerateContent(ctx, genai.Text(prompt))
+	if err != nil {
+		return nil, fmt.Errorf("failed to analyze note: %w", err)
+	}
+
+	if result == nil || len(result.Candidates) == 0 || result.Candidates[0].Content == nil {
+		return nil, fmt.Errorf("no analysis result returned")
+	}
+
+	responseText := strings.TrimSpace(string(result.Candidates[0].Content.Parts[0].(genai.Text)))
+
+	// Clean up response - remove markdown code blocks if present
+	responseText = strings.TrimPrefix(responseText, "```json")
+	responseText = strings.TrimPrefix(responseText, "```")
+	responseText = strings.TrimSuffix(responseText, "```")
+	responseText = strings.TrimSpace(responseText)
+
+	var analysis NoteAnalysis
+	if err := json.Unmarshal([]byte(responseText), &analysis); err != nil {
+		log.Printf("Failed to parse analysis JSON: %s, error: %v", responseText, err)
+		return nil, fmt.Errorf("failed to parse analysis response: %w", err)
+	}
+
+	// Validate and clean up title
+	analysis.Title = strings.Trim(analysis.Title, "\"'")
+	if len(analysis.Title) > 100 {
+		analysis.Title = analysis.Title[:100]
+	}
+	if analysis.Title == "" {
+		analysis.Title = "Untitled Note"
+	}
+
+	// Validate category
+	validCategory := false
+	analysis.Category = strings.ToLower(strings.TrimSpace(analysis.Category))
+	for _, cat := range CATEGORIES {
+		if analysis.Category == cat {
+			validCategory = true
+			break
+		}
+	}
+	if !validCategory {
+		analysis.Category = "other"
+	}
+
+	return &analysis, nil
+}
+
 func processNoteJob(job ProcessingJob) error {
+	// Note: Title, category, and summary are now generated during createNote()
+	// This job only handles embedding generation
+
 	fullText := job.Title + "\n\n" + job.Content
-	
-	// 1. Classify the note (always do this, even for sensitive content)
-	category, err := classifyNote(job.Title, job.Content)
-	if err != nil {
-		log.Printf("Classification failed for note %s: %v", job.NoteID.Hex(), err)
-		category = "other" // fallback
-	}
-	
-	// 2. Check if this is YouTube content and auto-generate summary
-	isYouTube := false
-	if job.Metadata != nil {
-		if platform, exists := job.Metadata["platform"]; exists {
-			if platformStr, ok := platform.(string); ok && platformStr == "youtube" {
-				isYouTube = true
-			}
-		}
-	}
-	
-	updateFields := bson.M{"category": category}
-	
-	if isYouTube {
-		log.Printf("Auto-generating summary for YouTube note: %s", job.NoteID.Hex())
-		summary, err := generateSummary(job.Content)
-		if err != nil {
-			log.Printf("Failed to generate auto-summary for YouTube note %s: %v", job.NoteID.Hex(), err)
-		} else {
-			updateFields["summary"] = summary
-			log.Printf("Successfully generated auto-summary for YouTube note: %s", job.NoteID.Hex())
-		}
-	}
-	
-	// 3. Update note with category and summary (if applicable)
-	_, err = notesCollection.UpdateOne(
-		context.Background(),
-		bson.M{"_id": job.NoteID},
-		bson.M{"$set": updateFields},
-	)
-	if err != nil {
-		log.Printf("Failed to update note for %s: %v", job.NoteID.Hex(), err)
-	}
-	
-	// 4. Skip embedding if sensitive data detected
+
+	// Skip embedding if sensitive data detected
 	if containsSensitiveData(fullText) {
 		log.Printf("Skipping embedding for note %s: Sensitive data detected (API keys, passwords, etc.)", job.NoteID.Hex())
 		return nil // Not an error, just skip embedding for security
 	}
-	
+
 	words := strings.Fields(fullText)
-	
+
 	if len(words) > MAX_WORDS {
 		words = words[:MAX_WORDS]
 		fullText = strings.Join(words, " ")
 	}
 
 	chunks := chunkText(fullText, CHUNK_SIZE)
-	
+
 	for i, chunk := range chunks {
 		chunkDoc := NoteChunk{
 			NoteID:   job.NoteID,
 			Content:  chunk,
 			ChunkIdx: i,
 		}
-		
+
 		result, err := chunksCollection.InsertOne(context.Background(), chunkDoc)
 		if err != nil {
 			log.Printf("Error saving chunk: %v", err)
 			continue
 		}
-		
+
 		chunkID := result.InsertedID.(primitive.ObjectID)
-		
+
 		embedding, err := generateEmbedding(chunk)
 		if err != nil {
 			log.Printf("Error generating embedding: %v", err)
@@ -537,7 +592,7 @@ type CreateNoteRequest struct {
 
 func createNote(c *gin.Context) {
 	log.Printf("=== CREATE NOTE FUNCTION CALLED ===")
-	
+
 	var req CreateNoteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		log.Printf("JSON binding error: %v", err)
@@ -545,21 +600,7 @@ func createNote(c *gin.Context) {
 		return
 	}
 
-	log.Printf("Request parsed: Content=%s, Metadata=%+v", req.Content, req.Metadata)
-	log.Printf("Metadata is nil: %t", req.Metadata == nil)
-	log.Printf("Metadata length: %d", len(req.Metadata))
-
-	// Generate title if not provided
-	title := req.Title
-	if title == "" {
-		generatedTitle, err := generateTitle(req.Content)
-		if err != nil {
-			log.Printf("Failed to generate title: %v", err)
-			title = "Untitled Note" // fallback
-		} else {
-			title = generatedTitle
-		}
-	}
+	log.Printf("Request parsed: Content length=%d, Metadata=%+v", len(req.Content), req.Metadata)
 
 	// Initialize metadata if nil
 	metadata := req.Metadata
@@ -567,9 +608,46 @@ func createNote(c *gin.Context) {
 		metadata = make(map[string]interface{})
 	}
 
+	// Check if this is YouTube content (needs summary)
+	isYouTube := false
+	if platform, exists := metadata["platform"]; exists {
+		if platformStr, ok := platform.(string); ok && platformStr == "youtube" {
+			isYouTube = true
+		}
+	}
+
+	// Use combined analysis if title not provided (single API call for title + category + optional summary)
+	var title, category, summary string
+	if req.Title == "" {
+		analysis, err := analyzeNote(req.Content, isYouTube)
+		if err != nil {
+			log.Printf("Failed to analyze note: %v", err)
+			title = "Untitled Note"
+			category = "other"
+		} else {
+			title = analysis.Title
+			category = analysis.Category
+			summary = analysis.Summary
+			log.Printf("Note analyzed - Title: %s, Category: %s, Summary length: %d", title, category, len(summary))
+		}
+	} else {
+		title = req.Title
+		// If title is provided, we still need category - do a quick analysis
+		analysis, err := analyzeNote(req.Content, isYouTube)
+		if err != nil {
+			log.Printf("Failed to analyze note for category: %v", err)
+			category = "other"
+		} else {
+			category = analysis.Category
+			summary = analysis.Summary
+		}
+	}
+
 	note := Note{
 		Title:    title,
 		Content:  req.Content,
+		Category: category,
+		Summary:  summary,
 		Created:  time.Now(),
 		Metadata: metadata,
 	}
@@ -581,14 +659,15 @@ func createNote(c *gin.Context) {
 	}
 
 	note.ID = result.InsertedID.(primitive.ObjectID)
-	
+
+	// Queue job for embedding generation only (title, category, summary already done)
 	job := ProcessingJob{
 		NoteID:   note.ID,
 		Title:    note.Title,
 		Content:  note.Content,
 		Metadata: note.Metadata,
 	}
-	
+
 	select {
 	case jobQueue <- job:
 		log.Printf("Queued embedding job for note: %s", note.ID.Hex())
