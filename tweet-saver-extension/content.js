@@ -75,7 +75,7 @@ class SocialMediaSaver {
         extensionEnabled: true,
         apiEndpoint: 'http://localhost:8080/notes',
         payloadTemplate: {
-          content: 'This post is from: {{author}} ({{handle}}) on {{platform}}\n\n{{shareContext}}{{content}}\n\nSource: {{url}}',
+          content: '{{content}}',
           metadata: {
             author: '{{author}}',
             handle: '{{handle}}',
@@ -98,7 +98,7 @@ class SocialMediaSaver {
         extensionEnabled: true,
         apiEndpoint: 'http://localhost:8080/notes',
         payloadTemplate: {
-          content: 'This post is from: {{author}} ({{handle}}) on {{platform}}\n\n{{shareContext}}{{content}}\n\nSource: {{url}}',
+          content: '{{content}}',
           metadata: {
             author: '{{author}}',
             handle: '{{handle}}',
@@ -967,7 +967,11 @@ class SocialMediaSaver {
         throw new Error('No transcript segments found');
       }
 
-      return transcriptSegments.join('\n');
+      // Join segments with spaces for natural flow, clean up extra whitespace
+      return transcriptSegments
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
 
     } catch (error) {
       console.error('Social Media Note Saver: Transcript extraction failed:', error);
@@ -1038,31 +1042,53 @@ class SocialMediaSaver {
     // Wait a bit longer for transcript panel to fully load
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    const segmentSelectors = [
-      'ytd-transcript-segment-renderer',
-      '.ytd-transcript-segment-renderer',
-      '[role="button"]:has(.segment-timestamp)',
-      '.transcript-segment',
-      'cue'
-    ];
-
     let segments = [];
 
-    for (const selector of segmentSelectors) {
-      const elements = document.querySelectorAll(selector);
-      console.log(`Social Media Note Saver: Found ${elements.length} segments with selector: ${selector}`);
+    // Try to get transcript segment text elements directly (avoiding timestamps)
+    const segmentTextElements = document.querySelectorAll('ytd-transcript-segment-renderer .segment-text');
+    console.log(`Social Media Note Saver: Found ${segmentTextElements.length} segment-text elements`);
 
-      if (elements.length > 0) {
-        for (const element of elements) {
-          const textElement = element.querySelector('.segment-text, [class*="text"], [class*="cue"]') || element;
-          const text = textElement.textContent?.trim();
-          if (text && text.length > 0) {
-            segments.push(text);
-          }
+    if (segmentTextElements.length > 0) {
+      for (const element of segmentTextElements) {
+        const text = element.textContent?.trim();
+        if (text && text.length > 0) {
+          segments.push(text);
         }
+      }
+    }
 
-        if (segments.length > 0) {
-          break;
+    // Fallback: try other selectors if direct approach didn't work
+    if (segments.length === 0) {
+      const segmentSelectors = [
+        'ytd-transcript-segment-renderer',
+        '.ytd-transcript-segment-renderer',
+        '.transcript-segment',
+        'cue'
+      ];
+
+      for (const selector of segmentSelectors) {
+        const elements = document.querySelectorAll(selector);
+        console.log(`Social Media Note Saver: Found ${elements.length} segments with selector: ${selector}`);
+
+        if (elements.length > 0) {
+          for (const element of elements) {
+            // Skip timestamp elements, only get text
+            const textElement = element.querySelector('.segment-text') ||
+                               element.querySelector('[class*="cue-text"]') ||
+                               element.querySelector('yt-formatted-string:not(.segment-timestamp)');
+
+            if (textElement) {
+              const text = textElement.textContent?.trim();
+              // Filter out timestamp patterns (e.g., "0:00", "12:34")
+              if (text && text.length > 0 && !/^\d+:\d+$/.test(text)) {
+                segments.push(text);
+              }
+            }
+          }
+
+          if (segments.length > 0) {
+            break;
+          }
         }
       }
     }

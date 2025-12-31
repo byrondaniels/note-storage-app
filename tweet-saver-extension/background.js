@@ -3,13 +3,37 @@
 // Handle extension installation
 chrome.runtime.onInstalled.addListener((details) => {
   console.log('Social Media Note Saver: Extension installed/updated', details);
-  
+
+  // Always migrate old template to clean version
+  chrome.storage.sync.get(['payloadTemplate'], (result) => {
+    const currentContent = result.payloadTemplate?.content || '';
+    if (currentContent.includes('This post is from') || !result.payloadTemplate) {
+      console.log('Social Media Note Saver: Migrating to clean payload template');
+      chrome.storage.sync.set({
+        payloadTemplate: {
+          content: '{{content}}',
+          metadata: {
+            author: '{{author}}',
+            handle: '{{handle}}',
+            url: '{{url}}',
+            timestamp: '{{timestamp}}',
+            platform: '{{platform}}',
+            isShare: '{{isShare}}',
+            sharedBy: '{{sharedBy}}',
+            shareContext: '{{shareContext}}',
+            metrics: '{{metrics}}'
+          }
+        }
+      });
+    }
+  });
+
   // Set default configuration on first install
   if (details.reason === 'install') {
     chrome.storage.sync.set({
       apiEndpoint: 'http://localhost:8080/notes',
       payloadTemplate: {
-        content: 'This post is from: {{author}} ({{handle}}) on {{platform}}\n\n{{shareContext}}{{content}}\n\nSource: {{url}}',
+        content: '{{content}}',
         metadata: {
           author: '{{author}}',
           handle: '{{handle}}',

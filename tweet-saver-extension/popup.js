@@ -34,7 +34,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         extensionEnabled: true,
         apiEndpoint: 'http://localhost:8080/notes',
         payloadTemplate: {
-          content: 'This post is from: {{author}} ({{handle}}) on {{platform}}\n\n{{shareContext}}{{content}}\n\nSource: {{url}}',
+          content: '{{content}}',
           metadata: {
             author: '{{author}}',
             handle: '{{handle}}',
