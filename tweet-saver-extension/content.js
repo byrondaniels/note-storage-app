@@ -1120,7 +1120,9 @@ class SocialMediaSaver {
 
   getYouTubeVideoInfo() {
     const videoTitle = document.querySelector('#title h1, .title, .watch-main-col .watch-title')?.textContent?.trim() || 'Unknown Title';
-    const channelName = document.querySelector('#channel-name, .ytd-channel-name, .watch-info-content .g-hovercard')?.textContent?.trim() || 'Unknown Channel';
+    // Use more specific selector to avoid duplicate text - get the innermost text element
+    const channelElement = document.querySelector('#channel-name a, #channel-name yt-formatted-string, ytd-channel-name yt-formatted-string a, .ytd-channel-name a');
+    const channelName = channelElement?.textContent?.trim() || 'Unknown Channel';
     const videoUrl = window.location.href.split('&')[0]; // Remove extra parameters
     
     // Handle both regular videos (/watch?v=) and live streams (/live/)

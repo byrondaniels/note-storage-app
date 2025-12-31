@@ -73,8 +73,9 @@ type AIQuestionResponse struct {
 }
 
 type SummarizeRequest struct {
-	NoteId  string `json:"noteId" binding:"required"`
-	Content string `json:"content" binding:"required"`
+	NoteId       string `json:"noteId"`
+	Content      string `json:"content"`
+	CustomPrompt string `json:"customPrompt"` // Optional override
 }
 
 type SummarizeResponse struct {
@@ -95,9 +96,20 @@ type NoteAnalysis struct {
 	Summary  string `json:"summary"`
 }
 
+// ChannelSettings holds per-channel configuration
+type ChannelSettings struct {
+	ID            primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ChannelName   string             `json:"channelName" bson:"channel_name"`
+	Platform      string             `json:"platform" bson:"platform"`
+	SummaryMode   string             `json:"summaryMode" bson:"summary_mode"`     // "default" or "custom"
+	CustomPrompt  string             `json:"customPrompt" bson:"custom_prompt"`
+	UpdatedAt     time.Time          `json:"updatedAt" bson:"updated_at"`
+}
+
 var (
-	notesCollection  *mongo.Collection
-	chunksCollection *mongo.Collection
+	notesCollection          *mongo.Collection
+	chunksCollection         *mongo.Collection
+	channelSettingsCollection *mongo.Collection
 	collectionsClient pb.CollectionsClient
 	pointsClient     pb.PointsClient
 	genaiClient      *genai.Client
@@ -147,7 +159,7 @@ const (
 	
 	// Gemini AI Model Configuration
 	EMBEDDING_MODEL      = "text-embedding-004"     // For generating embeddings
-	GENERATION_MODEL     = "gemini-2.5-flash"       // For text generation and classification
+	GENERATION_MODEL     = "gemini-2.5-flash-lite"  // For text generation and classification
 )
 
 func main() {
@@ -180,6 +192,7 @@ func main() {
 
 	notesCollection = mongoClient.Database("notesdb").Collection("notes")
 	chunksCollection = mongoClient.Database("notesdb").Collection("chunks")
+	channelSettingsCollection = mongoClient.Database("notesdb").Collection("channel_settings")
 
 	conn, err := grpc.Dial(qdrantURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -226,11 +239,19 @@ func main() {
 	r.POST("/ask", answerQuestion)
 	r.POST("/ai-question", askAIAboutNote)
 	r.POST("/summarize", summarizeNote)
+	r.POST("/summarize/:id", summarizeNoteById)
 	r.GET("/categories", getCategories)
 	r.GET("/notes/category/:category", getNotesByCategory)
 	r.GET("/categories/stats", getCategoryStats)
 	r.POST("/migrate/classify", classifyExistingNotes)
 	r.POST("/migrate/titles", regenerateAllTitles)
+
+	// Channel settings routes
+	r.GET("/channels", getChannelsWithNotes)
+	r.GET("/channel-settings", getAllChannelSettings)
+	r.GET("/channel-settings/:channel", getChannelSettings)
+	r.PUT("/channel-settings/:channel", updateChannelSettings)
+	r.DELETE("/channels/:channel/notes", deleteChannelNotes)
 
 	log.Println("Server starting on :8080")
 	r.Run(":8080")
@@ -564,7 +585,15 @@ func storeEmbedding(chunkID, noteID primitive.ObjectID, embedding []float32) err
 }
 
 func getNotes(c *gin.Context) {
-	cursor, err := notesCollection.Find(context.TODO(), bson.D{})
+	// Build filter based on query params
+	filter := bson.D{}
+
+	// Filter by channel (author) if provided
+	if channel := c.Query("channel"); channel != "" {
+		filter = append(filter, bson.E{Key: "metadata.author", Value: channel})
+	}
+
+	cursor, err := notesCollection.Find(context.TODO(), filter)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -1293,8 +1322,33 @@ func summarizeNote(c *gin.Context) {
 		return
 	}
 
+	// Look up the note to get channel/author info
+	var note Note
+	err = notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&note)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Note not found"})
+		return
+	}
+
+	// Check for custom summary prompt based on channel
+	var customPrompt string
+	if note.Metadata != nil {
+		if author, ok := note.Metadata["author"].(string); ok && author != "" {
+			var settings ChannelSettings
+			err = channelSettingsCollection.FindOne(
+				context.Background(),
+				bson.M{"channel_name": author},
+			).Decode(&settings)
+
+			if err == nil && settings.SummaryMode == "custom" && settings.CustomPrompt != "" {
+				customPrompt = settings.CustomPrompt
+				log.Printf("Using custom prompt for channel %s", author)
+			}
+		}
+	}
+
 	// Generate summary using Gemini
-	summary, err := generateSummary(req.Content)
+	summary, err := generateSummaryWithPrompt(req.Content, customPrompt)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate summary"})
 		return
@@ -1316,8 +1370,90 @@ func summarizeNote(c *gin.Context) {
 	})
 }
 
+// summarizeNoteById takes noteId from URL path and uses the note's content from DB
+func summarizeNoteById(c *gin.Context) {
+	noteId := c.Param("id")
+
+	// Convert note ID from string to ObjectID
+	objID, err := primitive.ObjectIDFromHex(noteId)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid note ID"})
+		return
+	}
+
+	// Look up the note
+	var note Note
+	err = notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&note)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Note not found"})
+		return
+	}
+
+	// Parse optional request body for customPrompt override
+	var req struct {
+		CustomPrompt string `json:"customPrompt"`
+	}
+	c.ShouldBindJSON(&req) // Ignore error - body is optional
+
+	// Determine which prompt to use
+	customPrompt := req.CustomPrompt
+
+	// If no override provided, check channel settings
+	if customPrompt == "" && note.Metadata != nil {
+		if author, ok := note.Metadata["author"].(string); ok && author != "" {
+			var settings ChannelSettings
+			err = channelSettingsCollection.FindOne(
+				context.Background(),
+				bson.M{"channel_name": author},
+			).Decode(&settings)
+
+			if err == nil && settings.SummaryMode == "custom" && settings.CustomPrompt != "" {
+				customPrompt = settings.CustomPrompt
+				log.Printf("Using custom prompt for channel %s", author)
+			}
+		}
+	}
+
+	// Generate summary using Gemini with the note's content
+	summary, err := generateSummaryWithPrompt(note.Content, customPrompt)
+	if err != nil {
+		log.Printf("Failed to generate summary: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate summary"})
+		return
+	}
+
+	// Update the note in the database with the summary
+	_, err = notesCollection.UpdateOne(
+		context.Background(),
+		bson.M{"_id": objID},
+		bson.M{"$set": bson.M{"summary": summary}},
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save summary"})
+		return
+	}
+
+	c.JSON(http.StatusOK, SummarizeResponse{
+		Summary: summary,
+	})
+}
+
 func generateSummary(content string) (string, error) {
-	prompt := fmt.Sprintf(`Please provide a concise and well-formatted summary of the following content. The summary should:
+	return generateSummaryWithPrompt(content, "")
+}
+
+func generateSummaryWithPrompt(content string, customPrompt string) (string, error) {
+	var prompt string
+
+	if customPrompt != "" {
+		// Use custom prompt - append content to it
+		prompt = fmt.Sprintf(`%s
+
+Content to summarize:
+%s`, customPrompt, content)
+	} else {
+		// Use default prompt
+		prompt = fmt.Sprintf(`Please provide a concise and well-formatted summary of the following content. The summary should:
 
 1. Be concise and to-the-point - avoid unnecessary words
 2. If the content includes lists or multiple points, clearly outline each point with bullet points or numbered lists
@@ -1336,6 +1472,7 @@ Content to summarize:
 %s
 
 Summary:`, content)
+	}
 
 	ctx := context.Background()
 	model := genaiClient.GenerativeModel(GENERATION_MODEL)
@@ -1397,5 +1534,207 @@ func regenerateAllTitles(c *gin.Context) {
 		"regenerated": regenerated,
 		"errors": errors,
 		"total": len(notes),
+	})
+}
+
+// Channel Settings Handlers
+
+func getChannelsWithNotes(c *gin.Context) {
+	// Aggregate to get unique channels (authors) from notes with their platform
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"metadata.author": bson.M{"$exists": true, "$ne": ""}}}},
+		{{Key: "$group", Value: bson.M{
+			"_id": "$metadata.author",
+			"platform": bson.M{"$first": "$metadata.platform"},
+			"noteCount": bson.M{"$sum": 1},
+		}}},
+		{{Key: "$sort", Value: bson.M{"noteCount": -1}}},
+	}
+
+	cursor, err := notesCollection.Aggregate(context.Background(), pipeline)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get channels"})
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	var channels []bson.M
+	if err = cursor.All(context.Background(), &channels); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode channels"})
+		return
+	}
+
+	// Transform to cleaner format
+	result := make([]gin.H, 0, len(channels))
+	for _, ch := range channels {
+		result = append(result, gin.H{
+			"name":      ch["_id"],
+			"platform":  ch["platform"],
+			"noteCount": ch["noteCount"],
+		})
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func getAllChannelSettings(c *gin.Context) {
+	cursor, err := channelSettingsCollection.Find(context.Background(), bson.M{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get channel settings"})
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	var settings []ChannelSettings
+	if err = cursor.All(context.Background(), &settings); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode settings"})
+		return
+	}
+
+	// Return empty array if no settings
+	if settings == nil {
+		settings = []ChannelSettings{}
+	}
+
+	c.JSON(http.StatusOK, settings)
+}
+
+func getChannelSettings(c *gin.Context) {
+	channelName := c.Param("channel")
+
+	var settings ChannelSettings
+	err := channelSettingsCollection.FindOne(
+		context.Background(),
+		bson.M{"channel_name": channelName},
+	).Decode(&settings)
+
+	if err == mongo.ErrNoDocuments {
+		// Return default settings if not found
+		c.JSON(http.StatusOK, ChannelSettings{
+			ChannelName:  channelName,
+			SummaryMode:  "default",
+			CustomPrompt: "",
+		})
+		return
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get settings"})
+		return
+	}
+
+	c.JSON(http.StatusOK, settings)
+}
+
+func updateChannelSettings(c *gin.Context) {
+	channelName := c.Param("channel")
+
+	var req struct {
+		Platform     string `json:"platform"`
+		SummaryMode  string `json:"summaryMode"`
+		CustomPrompt string `json:"customPrompt"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate summary mode
+	if req.SummaryMode != "default" && req.SummaryMode != "custom" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid summary mode"})
+		return
+	}
+
+	settings := ChannelSettings{
+		ChannelName:  channelName,
+		Platform:     req.Platform,
+		SummaryMode:  req.SummaryMode,
+		CustomPrompt: req.CustomPrompt,
+		UpdatedAt:    time.Now(),
+	}
+
+	// Upsert the settings
+	opts := options.Update().SetUpsert(true)
+	_, err := channelSettingsCollection.UpdateOne(
+		context.Background(),
+		bson.M{"channel_name": channelName},
+		bson.M{"$set": settings},
+		opts,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save settings"})
+		return
+	}
+
+	c.JSON(http.StatusOK, settings)
+}
+
+func deleteChannelNotes(c *gin.Context) {
+	channelName := c.Param("channel")
+
+	log.Printf("Deleting all notes for channel: %s", channelName)
+
+	// Find all notes for this channel
+	cursor, err := notesCollection.Find(
+		context.Background(),
+		bson.M{"metadata.author": channelName},
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find notes"})
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	var notes []Note
+	if err = cursor.All(context.Background(), &notes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode notes"})
+		return
+	}
+
+	deletedNotes := 0
+	deletedChunks := 0
+
+	// Delete each note and its associated chunks/embeddings
+	for _, note := range notes {
+		// Delete chunks for this note
+		chunkResult, err := chunksCollection.DeleteMany(
+			context.Background(),
+			bson.M{"note_id": note.ID},
+		)
+		if err != nil {
+			log.Printf("Error deleting chunks for note %s: %v", note.ID.Hex(), err)
+		} else {
+			deletedChunks += int(chunkResult.DeletedCount)
+		}
+
+		// TODO: Delete embeddings from Qdrant (would need to query by note_id in payload)
+
+		// Delete the note
+		_, err = notesCollection.DeleteOne(
+			context.Background(),
+			bson.M{"_id": note.ID},
+		)
+		if err != nil {
+			log.Printf("Error deleting note %s: %v", note.ID.Hex(), err)
+		} else {
+			deletedNotes++
+		}
+	}
+
+	// Also delete channel settings
+	channelSettingsCollection.DeleteOne(
+		context.Background(),
+		bson.M{"channel_name": channelName},
+	)
+
+	log.Printf("Deleted %d notes and %d chunks for channel: %s", deletedNotes, deletedChunks, channelName)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":       "Channel notes deleted",
+		"deletedNotes":  deletedNotes,
+		"deletedChunks": deletedChunks,
+		"channel":       channelName,
 	})
 }

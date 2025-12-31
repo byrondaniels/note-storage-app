@@ -60,14 +60,6 @@
           <div class="sidebar-header">
             <h2>Your Notes</h2>
             <div class="header-actions">
-              <button
-                @click="groupByChannel = !groupByChannel"
-                class="group-btn"
-                :class="{ 'active': groupByChannel }"
-                title="Group by channel"
-              >
-                <span class="action-icon">📺</span>
-              </button>
               <button @click="createNewNote" class="new-note-btn" title="Create new note">
                 <span class="action-icon">+</span>
                 New Note
@@ -225,10 +217,6 @@
             </div>
             
             <div class="note-actions">
-              <button @click="enterEditMode" class="action-btn edit-btn" title="Edit note">
-                <span class="action-icon">✏️</span>
-                Edit
-              </button>
               <button @click="openAIModal" class="action-btn ai-btn" title="Ask AI about this note">
                 <span class="action-icon">🤖</span>
                 AI Questions
@@ -439,9 +427,9 @@ export default {
       aiLoading: false,
       // Summarization functionality
       summarizing: false,
-      currentView: 'full', // 'full' or 'summary'
+      currentView: 'summary', // 'full' or 'summary' - default to summary
       // Grouping functionality
-      groupByChannel: false,
+      groupByChannel: true, // Always group by channel
       expandedChannels: {} // Track which channels are expanded
     }
   },
