@@ -38,45 +38,33 @@
         </div>
 
         <div class="form-group">
-          <label>Summary Prompt for Import:</label>
-          <div class="prompt-options">
-            <label class="prompt-option">
-              <input type="radio" v-model="importPromptMode" value="default" :disabled="importing" />
-              <span>Default prompt</span>
-            </label>
-            <label class="prompt-option" v-if="channelsWithCustomPrompts.length > 0">
-              <input type="radio" v-model="importPromptMode" value="copy" :disabled="importing" />
-              <span>Copy from:</span>
-              <select
-                v-model="importCopyFromChannel"
-                :disabled="importing || importPromptMode !== 'copy'"
-                class="copy-channel-select"
-              >
-                <option value="">Select channel...</option>
-                <option v-for="ch in channelsWithCustomPrompts" :key="ch.name" :value="ch.name">
-                  {{ ch.name }}
-                </option>
-              </select>
-            </label>
-            <label class="prompt-option">
-              <input type="radio" v-model="importPromptMode" value="custom" :disabled="importing" />
-              <span>Custom prompt</span>
-            </label>
+          <label>Summary Prompt:</label>
+          <div class="prompt-template-row">
+            <select v-model="importPromptTemplate" @change="onImportTemplateChange" :disabled="importing" class="template-select">
+              <option value="default">Default</option>
+              <option v-for="ch in channelsWithCustomPrompts" :key="ch.name" :value="ch.name">
+                {{ ch.name }}
+              </option>
+              <option value="custom">Custom</option>
+            </select>
           </div>
-        </div>
-
-        <div v-if="importPromptMode === 'custom'" class="form-group">
+          <div v-if="importPromptTemplate !== 'custom'" class="prompt-readonly">
+            {{ importPromptDisplay }}
+          </div>
           <textarea
+            v-else
             v-model="importCustomPrompt"
-            placeholder="Enter your custom summary prompt. The transcript will be appended."
-            rows="4"
+            placeholder="Enter your custom summary prompt. The transcript will be appended automatically."
+            rows="6"
             :disabled="importing"
+            class="prompt-textarea"
           ></textarea>
+          <p class="help-text">The video transcript will be appended when generating summaries.</p>
         </div>
 
         <button
           @click="startImport"
-          :disabled="importing || !importChannelUrl.trim() || (importPromptMode === 'copy' && !importCopyFromChannel)"
+          :disabled="importing || !importChannelUrl.trim()"
           class="import-btn"
         >
           {{ importing ? 'Importing...' : 'Import Transcripts' }}
@@ -118,15 +106,70 @@
       </div>
     </div>
 
-    <div v-if="loading" class="loading">Loading channels...</div>
+    <!-- Prompt Templates Section -->
+    <div class="templates-section">
+      <h2>Prompt Templates</h2>
+      <p class="section-desc">Manage saved prompts. These persist even when channel notes are deleted.</p>
 
-    <div v-else-if="channels.length === 0" class="no-channels">
-      <div class="empty-icon">📺</div>
-      <p>No channels found</p>
-      <p class="hint">Import some YouTube videos or save social media posts to see channels here.</p>
+      <div v-if="savedTemplates.length === 0" class="no-templates">
+        <p>No custom prompts saved yet. Import a channel or save settings to create one.</p>
+      </div>
+
+      <div v-else class="templates-list">
+        <div
+          v-for="template in savedTemplates"
+          :key="template.channelName"
+          class="template-card"
+          :class="{ 'expanded': expandedTemplate === template.channelName }"
+        >
+          <div class="template-header" @click="toggleTemplate(template.channelName)">
+            <span class="template-name">{{ template.channelName }}</span>
+            <span class="expand-icon">{{ expandedTemplate === template.channelName ? '▼' : '▶' }}</span>
+          </div>
+
+          <div v-if="expandedTemplate === template.channelName" class="template-content">
+            <div class="form-group">
+              <label>Custom Prompt:</label>
+              <textarea
+                v-model="editingTemplates[template.channelName]"
+                placeholder="Enter your custom summary prompt..."
+                rows="6"
+                class="prompt-textarea"
+              ></textarea>
+            </div>
+            <div class="template-actions">
+              <button
+                @click="saveTemplate(template.channelName)"
+                :disabled="savingTemplate === template.channelName"
+                class="save-btn"
+              >
+                {{ savingTemplate === template.channelName ? 'Saving...' : 'Save' }}
+              </button>
+              <button
+                @click="deleteTemplate(template.channelName)"
+                :disabled="deletingTemplate === template.channelName"
+                class="delete-template-btn"
+              >
+                {{ deletingTemplate === template.channelName ? 'Deleting...' : 'Delete Prompt' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <div v-else class="channels-list">
+    <!-- Channels Section -->
+    <div class="channels-section">
+      <h2>Channels</h2>
+      <p class="section-desc">Channels with imported notes.</p>
+
+      <div v-if="loading" class="loading">Loading channels...</div>
+
+      <div v-else-if="channels.length === 0" class="no-channels">
+        <p>No channels with notes yet. Import some YouTube videos to get started.</p>
+      </div>
+
+      <div v-else class="channels-list">
       <div
         v-for="channel in channels"
         :key="channel.name"
@@ -149,43 +192,35 @@
 
         <div v-if="expandedChannel === channel.name" class="channel-settings-form">
           <div class="form-group">
-            <label>Summary Prompt Mode:</label>
-            <div class="radio-group">
-              <label class="radio-option">
-                <input
-                  type="radio"
-                  :name="'mode-' + channel.name"
-                  value="default"
-                  v-model="editingSettings[channel.name].summaryMode"
-                />
-                <span class="radio-label">Default</span>
-                <span class="radio-desc">Use the built-in summary prompt</span>
-              </label>
-              <label class="radio-option">
-                <input
-                  type="radio"
-                  :name="'mode-' + channel.name"
-                  value="custom"
-                  v-model="editingSettings[channel.name].summaryMode"
-                />
-                <span class="radio-label">Custom</span>
-                <span class="radio-desc">Use a custom prompt for this channel</span>
-              </label>
+            <label>Summary Prompt:</label>
+            <div class="prompt-template-row">
+              <select
+                v-model="editingSettings[channel.name].templateSource"
+                @change="onChannelTemplateChange(channel.name)"
+                class="template-select"
+              >
+                <option value="default">Default</option>
+                <option
+                  v-for="ch in getOtherChannelsWithPrompts(channel.name)"
+                  :key="ch.name"
+                  :value="ch.name"
+                >
+                  {{ ch.name }}
+                </option>
+                <option value="custom">Custom</option>
+              </select>
             </div>
-          </div>
-
-          <div v-if="editingSettings[channel.name].summaryMode === 'custom'" class="form-group">
-            <label for="customPrompt">Custom Summary Prompt:</label>
+            <div v-if="editingSettings[channel.name].templateSource !== 'custom'" class="prompt-readonly">
+              {{ getChannelPromptDisplay(channel.name) }}
+            </div>
             <textarea
-              id="customPrompt"
+              v-else
               v-model="editingSettings[channel.name].customPrompt"
-              placeholder="Enter your custom prompt here. The content will be appended after this prompt."
+              placeholder="Enter your custom summary prompt. The transcript will be appended automatically."
               rows="6"
+              class="prompt-textarea"
             ></textarea>
-            <p class="help-text">
-              Tip: Write instructions for how you want the content summarized.
-              The transcript/content will be automatically appended.
-            </p>
+            <p class="help-text">The video transcript will be appended when generating summaries.</p>
           </div>
 
           <div class="form-actions">
@@ -241,6 +276,7 @@
           </div>
         </div>
       </div>
+      </div>
     </div>
   </div>
 </template>
@@ -250,6 +286,21 @@ import axios from 'axios'
 
 const API_URL = process.env.VUE_APP_API_URL || 'http://localhost:8080'
 const EXTENSION_ID = 'koodfochknchgnegkcmcfcidkfgdfgkc'
+
+const DEFAULT_PROMPT = `Please provide a concise and well-formatted summary of the following content. The summary should:
+
+1. Be concise and to-the-point - avoid unnecessary words
+2. If the content includes lists or multiple points, clearly outline each point with bullet points or numbered lists
+3. Use proper spacing with line breaks between different sections or topics
+4. Structure the information logically with clear paragraphs
+5. Capture the key takeaways and main ideas
+6. If there are actionable items or recommendations, list them clearly
+7. Maintain the essential context but eliminate redundancy
+
+Format your response with:
+- Clear paragraph breaks between different topics
+- Bullet points (•) or numbered lists when covering multiple items
+- Proper spacing for readability`
 
 export default {
   name: 'ChannelSettings',
@@ -275,8 +326,7 @@ export default {
       importing: false,
       importChannelUrl: '',
       importVideoLimit: '20',
-      importPromptMode: 'default',
-      importCopyFromChannel: '',
+      importPromptTemplate: 'default',
       importCustomPrompt: '',
       importProgress: {
         active: false,
@@ -285,19 +335,39 @@ export default {
         videoTitle: ''
       },
       importMessage: '',
-      importMessageType: ''
+      importMessageType: '',
+      // Template management
+      expandedTemplate: null,
+      editingTemplates: {},
+      savingTemplate: null,
+      deletingTemplate: null
     }
   },
   computed: {
+    savedTemplates() {
+      // Return all saved channel settings as an array
+      return Object.values(this.channelSettings).filter(s => s && s.customPrompt)
+    },
     channelsWithCustomPrompts() {
       return this.channels.filter(ch => {
         const settings = this.channelSettings[ch.name]
-        return settings && settings.summaryMode === 'custom' && settings.customPrompt
+        return settings && settings.customPrompt && settings.customPrompt.trim() !== ''
       })
     },
     importProgressPercentage() {
       if (this.importProgress.total === 0) return 0
       return Math.round((this.importProgress.current / this.importProgress.total) * 100)
+    },
+    importPromptDisplay() {
+      if (this.importPromptTemplate === 'default') {
+        return DEFAULT_PROMPT
+      } else if (this.importPromptTemplate !== 'custom') {
+        const sourceSettings = this.channelSettings[this.importPromptTemplate]
+        if (sourceSettings && sourceSettings.customPrompt) {
+          return sourceSettings.customPrompt
+        }
+      }
+      return DEFAULT_PROMPT
     }
   },
   async mounted() {
@@ -333,9 +403,19 @@ export default {
         this.editingSettings = {}
         for (const channel of this.channels) {
           const existing = this.channelSettings[channel.name]
+          const hasCustomPrompt = existing?.customPrompt && existing.customPrompt.trim() !== ''
           this.editingSettings[channel.name] = {
-            summaryMode: existing?.summaryMode || 'default',
-            customPrompt: existing?.customPrompt || ''
+            // If channel has custom prompt, show as "custom", otherwise "default"
+            templateSource: hasCustomPrompt ? 'custom' : 'default',
+            customPrompt: hasCustomPrompt ? existing.customPrompt : ''
+          }
+        }
+
+        // Initialize editing state for templates
+        this.editingTemplates = {}
+        for (const s of settings) {
+          if (s.customPrompt) {
+            this.editingTemplates[s.channelName] = s.customPrompt
           }
         }
       } catch (error) {
@@ -347,6 +427,97 @@ export default {
 
     getChannelSetting(channelName) {
       return this.channelSettings[channelName]
+    },
+
+    // Template management methods
+    toggleTemplate(channelName) {
+      if (this.expandedTemplate === channelName) {
+        this.expandedTemplate = null
+      } else {
+        this.expandedTemplate = channelName
+      }
+    },
+
+    async saveTemplate(channelName) {
+      this.savingTemplate = channelName
+      try {
+        const prompt = this.editingTemplates[channelName]
+        await axios.put(`${API_URL}/channel-settings/${encodeURIComponent(channelName)}`, {
+          platform: this.channelSettings[channelName]?.platform || 'youtube',
+          summaryMode: 'custom',
+          customPrompt: prompt
+        })
+
+        // Update local cache
+        this.channelSettings[channelName] = {
+          ...this.channelSettings[channelName],
+          channelName: channelName,
+          customPrompt: prompt
+        }
+      } catch (error) {
+        console.error('Failed to save template:', error)
+        alert('Failed to save template. Please try again.')
+      } finally {
+        this.savingTemplate = null
+      }
+    },
+
+    async deleteTemplate(channelName) {
+      if (!confirm(`Delete the prompt template for "${channelName}"?`)) {
+        return
+      }
+
+      this.deletingTemplate = channelName
+      try {
+        await axios.delete(`${API_URL}/channel-settings/${encodeURIComponent(channelName)}`)
+
+        // Remove from local cache
+        delete this.channelSettings[channelName]
+        delete this.editingTemplates[channelName]
+        this.expandedTemplate = null
+      } catch (error) {
+        console.error('Failed to delete template:', error)
+        alert('Failed to delete template. Please try again.')
+      } finally {
+        this.deletingTemplate = null
+      }
+    },
+
+    getOtherChannelsWithPrompts(currentChannel) {
+      return this.channels.filter(ch => {
+        if (ch.name === currentChannel) return false
+        const settings = this.channelSettings[ch.name]
+        return settings && settings.customPrompt && settings.customPrompt.trim() !== ''
+      })
+    },
+
+    getChannelPromptDisplay(channelName) {
+      const templateSource = this.editingSettings[channelName]?.templateSource
+      if (templateSource === 'default') {
+        return DEFAULT_PROMPT
+      } else if (templateSource && templateSource !== 'custom') {
+        const sourceSettings = this.channelSettings[templateSource]
+        if (sourceSettings && sourceSettings.customPrompt) {
+          return sourceSettings.customPrompt
+        }
+      }
+      return DEFAULT_PROMPT
+    },
+
+    onImportTemplateChange() {
+      // When switching to custom, initialize with empty or keep existing
+      if (this.importPromptTemplate === 'custom' && !this.importCustomPrompt) {
+        this.importCustomPrompt = ''
+      }
+    },
+
+    onChannelTemplateChange(channelName) {
+      // When switching to custom, initialize with empty if not already set
+      if (this.editingSettings[channelName].templateSource === 'custom') {
+        if (!this.editingSettings[channelName].customPrompt) {
+          this.editingSettings[channelName].customPrompt = ''
+        }
+      }
     },
 
     toggleChannel(channelName) {
@@ -385,9 +556,19 @@ export default {
 
       this.refreshingSummary = channel.name
       try {
-        // Get custom prompt if set
+        // Determine which prompt to use based on template selection
         const settings = this.editingSettings[channel.name]
-        const customPrompt = settings.summaryMode === 'custom' ? settings.customPrompt : ''
+        let customPrompt = ''
+
+        if (settings.templateSource === 'custom') {
+          customPrompt = settings.customPrompt
+        } else if (settings.templateSource !== 'default') {
+          const sourceSettings = this.channelSettings[settings.templateSource]
+          if (sourceSettings && sourceSettings.customPrompt) {
+            customPrompt = sourceSettings.customPrompt
+          }
+        }
+        // If default, customPrompt stays empty and backend uses default
 
         await axios.post(`${API_URL}/summarize/${noteId}`, {
           customPrompt: customPrompt
@@ -411,17 +592,35 @@ export default {
 
       try {
         const settings = this.editingSettings[channel.name]
+
+        // Determine which prompt to save based on template selection
+        let promptToSave = ''
+        let modeToSave = 'default'
+
+        if (settings.templateSource === 'custom') {
+          promptToSave = settings.customPrompt
+          modeToSave = 'custom'
+        } else if (settings.templateSource !== 'default') {
+          // Copying from another channel - save that prompt
+          const sourceSettings = this.channelSettings[settings.templateSource]
+          if (sourceSettings && sourceSettings.customPrompt) {
+            promptToSave = sourceSettings.customPrompt
+            modeToSave = 'custom'
+          }
+        }
+
         await axios.put(`${API_URL}/channel-settings/${encodeURIComponent(channel.name)}`, {
           platform: channel.platform,
-          summaryMode: settings.summaryMode,
-          customPrompt: settings.customPrompt
+          summaryMode: modeToSave,
+          customPrompt: promptToSave
         })
 
         // Update local cache
         this.channelSettings[channel.name] = {
           channelName: channel.name,
           platform: channel.platform,
-          ...settings
+          summaryMode: modeToSave,
+          customPrompt: promptToSave
         }
 
         this.savedChannel = channel.name
@@ -521,21 +720,23 @@ export default {
         return
       }
 
-      // Determine the custom prompt to use
-      let customPromptForImport = ''
-      if (this.importPromptMode === 'custom') {
-        customPromptForImport = this.importCustomPrompt
-      } else if (this.importPromptMode === 'copy' && this.importCopyFromChannel) {
-        const sourceSettings = this.channelSettings[this.importCopyFromChannel]
+      // Determine which prompt to use based on template selection
+      let promptToUse = ''
+      if (this.importPromptTemplate === 'custom') {
+        promptToUse = this.importCustomPrompt
+      } else if (this.importPromptTemplate !== 'default') {
+        // Using another channel's prompt
+        const sourceSettings = this.channelSettings[this.importPromptTemplate]
         if (sourceSettings && sourceSettings.customPrompt) {
-          customPromptForImport = sourceSettings.customPrompt
+          promptToUse = sourceSettings.customPrompt
         }
       }
+      // If default or empty, promptToUse stays empty (backend uses default)
 
-      // Store the prompt config to be applied after first video is imported
+      // Store the prompt to be applied after first video is imported
       this.pendingImportPrompt = {
-        mode: this.importPromptMode === 'default' ? 'default' : 'custom',
-        prompt: customPromptForImport
+        mode: promptToUse ? 'custom' : 'default',
+        prompt: promptToUse
       }
 
       this.importing = true
@@ -696,23 +897,61 @@ export default {
   font-size: 14px;
 }
 
-.prompt-options {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.prompt-option {
+.prompt-template-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.template-label {
+  font-size: 13px;
+  color: #666;
+}
+
+.template-select {
+  padding: 6px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
   font-size: 14px;
-  color: #333;
+  background: white;
   cursor: pointer;
 }
 
-.prompt-option input[type="radio"] {
-  margin: 0;
+.template-select:focus {
+  outline: none;
+  border-color: #007AFF;
+}
+
+.prompt-textarea {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.prompt-textarea:focus {
+  outline: none;
+  border-color: #007AFF;
+}
+
+.prompt-readonly {
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 13px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  line-height: 1.5;
+  color: #555;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .copy-channel-select {
@@ -819,6 +1058,104 @@ export default {
   background: #fff3cd;
   color: #856404;
   border: 1px solid #ffeeba;
+}
+
+/* Templates Section */
+.templates-section,
+.channels-section {
+  margin-bottom: 30px;
+}
+
+.templates-section h2,
+.channels-section h2 {
+  font-size: 18px;
+  color: #333;
+  margin: 0 0 8px 0;
+}
+
+.section-desc {
+  color: #666;
+  font-size: 14px;
+  margin: 0 0 16px 0;
+}
+
+.no-templates {
+  background: #f9f9f9;
+  padding: 20px;
+  border-radius: 8px;
+  text-align: center;
+  color: #666;
+}
+
+.no-templates p {
+  margin: 0;
+}
+
+.templates-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.template-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.template-card.expanded {
+  border-color: #007AFF;
+}
+
+.template-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  cursor: pointer;
+  background: #fafafa;
+}
+
+.template-card.expanded .template-header {
+  background: #f0f7ff;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.template-name {
+  font-weight: 500;
+  color: #333;
+}
+
+.template-content {
+  padding: 16px;
+}
+
+.template-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.delete-template-btn {
+  background: transparent;
+  color: #dc3545;
+  border: 1px solid #dc3545;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.delete-template-btn:hover:not(:disabled) {
+  background: #dc3545;
+  color: white;
+}
+
+.delete-template-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 h1 {

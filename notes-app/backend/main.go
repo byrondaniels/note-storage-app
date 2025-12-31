@@ -98,12 +98,12 @@ type NoteAnalysis struct {
 
 // ChannelSettings holds per-channel configuration
 type ChannelSettings struct {
-	ID            primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	ChannelName   string             `json:"channelName" bson:"channel_name"`
-	Platform      string             `json:"platform" bson:"platform"`
-	SummaryMode   string             `json:"summaryMode" bson:"summary_mode"`     // "default" or "custom"
-	CustomPrompt  string             `json:"customPrompt" bson:"custom_prompt"`
-	UpdatedAt     time.Time          `json:"updatedAt" bson:"updated_at"`
+	ID           primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ChannelName  string             `json:"channelName" bson:"channel_name"`
+	Platform     string             `json:"platform" bson:"platform"`
+	PromptText   string             `json:"promptText" bson:"prompt_text"`     // Instructions for the AI
+	PromptSchema string             `json:"promptSchema" bson:"prompt_schema"` // Expected JSON output structure
+	UpdatedAt    time.Time          `json:"updatedAt" bson:"updated_at"`
 }
 
 var (
@@ -251,6 +251,7 @@ func main() {
 	r.GET("/channel-settings", getAllChannelSettings)
 	r.GET("/channel-settings/:channel", getChannelSettings)
 	r.PUT("/channel-settings/:channel", updateChannelSettings)
+	r.DELETE("/channel-settings/:channel", deleteChannelSettings)
 	r.DELETE("/channels/:channel/notes", deleteChannelNotes)
 
 	log.Println("Server starting on :8080")
@@ -1340,8 +1341,8 @@ func summarizeNote(c *gin.Context) {
 				bson.M{"channel_name": author},
 			).Decode(&settings)
 
-			if err == nil && settings.SummaryMode == "custom" && settings.CustomPrompt != "" {
-				customPrompt = settings.CustomPrompt
+			if err == nil && settings.PromptText != "" {
+				customPrompt = settings.PromptText
 				log.Printf("Using custom prompt for channel %s", author)
 			}
 		}
@@ -1407,8 +1408,8 @@ func summarizeNoteById(c *gin.Context) {
 				bson.M{"channel_name": author},
 			).Decode(&settings)
 
-			if err == nil && settings.SummaryMode == "custom" && settings.CustomPrompt != "" {
-				customPrompt = settings.CustomPrompt
+			if err == nil && settings.PromptText != "" {
+				customPrompt = settings.PromptText
 				log.Printf("Using custom prompt for channel %s", author)
 			}
 		}
@@ -1612,8 +1613,8 @@ func getChannelSettings(c *gin.Context) {
 		// Return default settings if not found
 		c.JSON(http.StatusOK, ChannelSettings{
 			ChannelName:  channelName,
-			SummaryMode:  "default",
-			CustomPrompt: "",
+			PromptText:   "",
+			PromptSchema: "",
 		})
 		return
 	}
@@ -1631,8 +1632,8 @@ func updateChannelSettings(c *gin.Context) {
 
 	var req struct {
 		Platform     string `json:"platform"`
-		SummaryMode  string `json:"summaryMode"`
-		CustomPrompt string `json:"customPrompt"`
+		PromptText   string `json:"promptText"`
+		PromptSchema string `json:"promptSchema"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1640,17 +1641,20 @@ func updateChannelSettings(c *gin.Context) {
 		return
 	}
 
-	// Validate summary mode
-	if req.SummaryMode != "default" && req.SummaryMode != "custom" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid summary mode"})
-		return
+	// Validate promptSchema is valid JSON if provided
+	if req.PromptSchema != "" {
+		var js json.RawMessage
+		if err := json.Unmarshal([]byte(req.PromptSchema), &js); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON in promptSchema"})
+			return
+		}
 	}
 
 	settings := ChannelSettings{
 		ChannelName:  channelName,
 		Platform:     req.Platform,
-		SummaryMode:  req.SummaryMode,
-		CustomPrompt: req.CustomPrompt,
+		PromptText:   req.PromptText,
+		PromptSchema: req.PromptSchema,
 		UpdatedAt:    time.Now(),
 	}
 
@@ -1669,6 +1673,29 @@ func updateChannelSettings(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, settings)
+}
+
+func deleteChannelSettings(c *gin.Context) {
+	channelName := c.Param("channel")
+
+	log.Printf("Deleting channel settings for: %s", channelName)
+
+	result, err := channelSettingsCollection.DeleteOne(
+		context.Background(),
+		bson.M{"channel_name": channelName},
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete settings"})
+		return
+	}
+
+	if result.DeletedCount == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Settings not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Settings deleted"})
 }
 
 func deleteChannelNotes(c *gin.Context) {
