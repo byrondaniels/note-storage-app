@@ -1,13 +1,20 @@
 {
   "manifest_version": 3,
   "name": "Social Media Note Saver",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Save social media posts to your notes API with one click",
-  
+
   "permissions": [
     "storage",
     "activeTab"
   ],
+
+  "externally_connectable": {
+    "matches": [
+      "http://localhost:*/*",
+      "http://127.0.0.1:*/*"
+    ]
+  },
   
   "host_permissions": [
     "https://twitter.com/*",
@@ -32,6 +39,14 @@
       ],
       "js": ["content.js"],
       "css": ["styles.css"],
+      "run_at": "document_end"
+    },
+    {
+      "matches": [
+        "http://localhost:*/*",
+        "http://127.0.0.1:*/*"
+      ],
+      "js": ["localhost-bridge.js"],
       "run_at": "document_end"
     }
   ],

@@ -26,6 +26,35 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
 });
 
+// Store the sender tab ID for progress updates to Vue app
+let externalSenderTabId = null
+
+// Handle messages from external sources (Vue app on localhost)
+chrome.runtime.onMessageExternal.addListener((request, sender, sendResponse) => {
+  console.log('Social Media Note Saver: External message received:', request.action, 'from:', sender.url)
+
+  if (request.action === 'ping') {
+    sendResponse({ success: true, message: 'Extension is available' })
+    return
+  }
+
+  if (request.action === 'importChannel') {
+    // Store the sender tab ID for progress updates
+    externalSenderTabId = sender.tab ? sender.tab.id : null
+    console.log('Social Media Note Saver: External import request, sender tab:', externalSenderTabId)
+
+    handleChannelImport(request.channelUrl, request.limit || 20, externalSenderTabId)
+      .then(() => {
+        sendResponse({ success: true })
+      })
+      .catch(error => {
+        console.error('Social Media Note Saver: External import failed:', error)
+        sendResponse({ success: false, error: error.message })
+      })
+    return true // Required for async response
+  }
+})
+
 // Handle messages from content script or popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'getConfig') {
@@ -52,8 +81,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'importChannel') {
     // Handle channel import request
-    const senderTabId = sender.tab ? sender.tab.id : null;
-    handleChannelImport(request.channelUrl, request.limit || 20, senderTabId)
+    handleChannelImport(request.channelUrl, request.limit || 20)
       .then(() => {
         sendResponse({ success: true });
       })
@@ -140,7 +168,22 @@ function navigateAndWait(tabId, url) {
   });
 }
 
-async function processVideoQueue(tabId, videos, senderTabId) {
+// Helper to send progress updates to both popup and Vue app
+function sendProgressUpdate(message, vueAppTabId) {
+  // Send to popup (internal)
+  chrome.runtime.sendMessage(message).catch(() => {
+    // Ignore errors if popup is closed
+  })
+
+  // Send to Vue app via content script bridge
+  if (vueAppTabId) {
+    chrome.tabs.sendMessage(vueAppTabId, message).catch(() => {
+      // Ignore errors if tab is closed
+    })
+  }
+}
+
+async function processVideoQueue(tabId, videos, vueAppTabId) {
   console.log('Social Media Note Saver: Processing', videos.length, 'videos');
 
   let processed = 0;
@@ -152,16 +195,14 @@ async function processVideoQueue(tabId, videos, senderTabId) {
     try {
       console.log(`Social Media Note Saver: Processing video ${processed + 1}/${videos.length}:`, video.title);
 
-      // Send progress update to popup
-      chrome.tabs.sendMessage(senderTabId, {
+      // Send progress update to popup and Vue app
+      sendProgressUpdate({
         action: 'importProgress',
         current: processed + 1,
         total: videos.length,
         status: 'processing',
         videoTitle: video.title
-      }).catch(() => {
-        // Ignore errors if popup is closed
-      });
+      }, vueAppTabId);
 
       // Navigate to video page
       await navigateAndWait(tabId, video.url);
@@ -203,37 +244,42 @@ async function processVideoQueue(tabId, videos, senderTabId) {
 
   console.log('Social Media Note Saver: Import complete. Succeeded:', succeeded, 'Skipped:', skipped, 'Failed:', failed);
 
-  // Send completion message to popup
-  chrome.tabs.sendMessage(senderTabId, {
+  // Send completion message to popup and Vue app
+  sendProgressUpdate({
     action: 'importProgress',
-    current: videos.length,
+    completed: true,
+    current: succeeded,
     total: videos.length,
     status: 'complete',
     succeeded: succeeded,
     skipped: skipped,
     failed: failed
-  }).catch(() => {
-    // Ignore errors if popup is closed
-  });
+  }, vueAppTabId);
 
   return { succeeded, skipped, failed, total: videos.length };
 }
 
-async function handleChannelImport(channelUrl, limit, senderTabId) {
-  console.log('Social Media Note Saver: Starting channel import for:', channelUrl, 'limit:', limit);
+async function handleChannelImport(channelUrl, limit, vueAppTabId = null) {
+  console.log('Social Media Note Saver: Starting channel import for:', channelUrl, 'limit:', limit, 'vueAppTabId:', vueAppTabId);
+
+  let tabId = null;
 
   try {
     // Normalize the channel URL
     const normalizedUrl = normalizeChannelUrl(channelUrl);
     console.log('Social Media Note Saver: Normalized URL:', normalizedUrl);
 
-    // Create or get a tab for the import process
-    const tab = await chrome.tabs.create({ url: normalizedUrl, active: false });
-    const tabId = tab.id;
+    // Create a tab for the import process
+    const tab = await chrome.tabs.create({ url: 'about:blank', active: true });
+    tabId = tab.id;
+    console.log('Social Media Note Saver: Created tab', tabId);
 
-    console.log('Social Media Note Saver: Created tab', tabId, 'for channel page');
+    // Navigate to channel page and wait for it to load
+    console.log('Social Media Note Saver: Navigating to channel page...');
+    await navigateAndWait(tabId, normalizedUrl);
 
-    // Wait for the channel page to load
+    // Wait extra time for content script to initialize and page to settle
+    console.log('Social Media Note Saver: Waiting for content script to initialize...');
     await new Promise(resolve => setTimeout(resolve, 3000));
 
     // Send message to content script to scrape videos
@@ -263,7 +309,7 @@ async function handleChannelImport(channelUrl, limit, senderTabId) {
     }
 
     // Process the video queue
-    await processVideoQueue(tabId, videos, senderTabId);
+    await processVideoQueue(tabId, videos, vueAppTabId);
 
     // Close the import tab
     chrome.tabs.remove(tabId);
@@ -272,14 +318,23 @@ async function handleChannelImport(channelUrl, limit, senderTabId) {
   } catch (error) {
     console.error('Social Media Note Saver: Channel import failed:', error);
 
-    // Send error to popup
-    chrome.tabs.sendMessage(senderTabId, {
+    // Clean up the tab if it was created
+    if (tabId) {
+      try {
+        await chrome.tabs.remove(tabId);
+      } catch (e) {
+        // Ignore errors if tab already closed
+      }
+    }
+
+    // Send error to popup and Vue app
+    sendProgressUpdate({
       action: 'importProgress',
-      status: 'error',
+      completed: true,
+      current: 0,
+      total: 0,
       error: error.message
-    }).catch(() => {
-      // Ignore errors if popup is closed
-    });
+    }, vueAppTabId);
 
     throw error;
   }

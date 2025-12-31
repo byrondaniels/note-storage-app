@@ -949,25 +949,26 @@ class SocialMediaSaver {
 
   async getYouTubeTranscript() {
     console.log('Social Media Note Saver: Attempting to extract YouTube transcript...');
-    
+
     try {
       // First, try to find and click the transcript button to open it
       const transcriptButton = await this.findAndClickTranscriptButton();
       if (!transcriptButton) {
         throw new Error('Could not find transcript button - transcript may not be available');
       }
-      
-      // Wait for transcript panel to load
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
+
+      // Wait 5 seconds for transcript panel to load
+      console.log('Social Media Note Saver: Waiting 5 seconds for transcript to load...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
       // Extract transcript segments
       const transcriptSegments = await this.extractTranscriptSegments();
       if (!transcriptSegments || transcriptSegments.length === 0) {
         throw new Error('No transcript segments found');
       }
-      
+
       return transcriptSegments.join('\n');
-      
+
     } catch (error) {
       console.error('Social Media Note Saver: Transcript extraction failed:', error);
       throw error;
@@ -985,7 +986,7 @@ class SocialMediaSaver {
       '#description button:has-text("Show transcript")',
       'button:has-text("Show transcript")'
     ];
-    
+
     for (const selector of transcriptSelectors) {
       try {
         // Handle special :has-text selector
@@ -1011,14 +1012,14 @@ class SocialMediaSaver {
         console.log('Social Media Note Saver: Error with selector', selector, error);
       }
     }
-    
+
     // Try looking in description expand area
     const showMoreButton = document.querySelector('#description button[aria-label*="more" i], #expand');
     if (showMoreButton) {
       console.log('Social Media Note Saver: Expanding description to look for transcript');
       showMoreButton.click();
       await new Promise(resolve => setTimeout(resolve, 500));
-      
+
       // Try transcript selectors again
       for (const selector of transcriptSelectors) {
         const button = document.querySelector(selector);
@@ -1029,14 +1030,14 @@ class SocialMediaSaver {
         }
       }
     }
-    
+
     return null;
   }
 
   async extractTranscriptSegments() {
     // Wait a bit longer for transcript panel to fully load
     await new Promise(resolve => setTimeout(resolve, 1000));
-    
+
     const segmentSelectors = [
       'ytd-transcript-segment-renderer',
       '.ytd-transcript-segment-renderer',
@@ -1044,13 +1045,13 @@ class SocialMediaSaver {
       '.transcript-segment',
       'cue'
     ];
-    
+
     let segments = [];
-    
+
     for (const selector of segmentSelectors) {
       const elements = document.querySelectorAll(selector);
       console.log(`Social Media Note Saver: Found ${elements.length} segments with selector: ${selector}`);
-      
+
       if (elements.length > 0) {
         for (const element of elements) {
           const textElement = element.querySelector('.segment-text, [class*="text"], [class*="cue"]') || element;
@@ -1059,13 +1060,13 @@ class SocialMediaSaver {
             segments.push(text);
           }
         }
-        
+
         if (segments.length > 0) {
           break;
         }
       }
     }
-    
+
     // If no structured segments found, try to get all text from transcript area
     if (segments.length === 0) {
       const transcriptAreas = [
@@ -1074,7 +1075,7 @@ class SocialMediaSaver {
         '[aria-label*="transcript" i]',
         '.transcript-content'
       ];
-      
+
       for (const selector of transcriptAreas) {
         const area = document.querySelector(selector);
         if (area) {
@@ -1087,7 +1088,7 @@ class SocialMediaSaver {
         }
       }
     }
-    
+
     return segments;
   }
 
@@ -1197,13 +1198,6 @@ class SocialMediaSaver {
         throw new Error('Could not determine video ID');
       }
 
-      // Check if already imported
-      const alreadyImported = await isVideoImported(videoId);
-      if (alreadyImported) {
-        console.log('Social Media Note Saver: Video already imported, skipping:', videoId);
-        return { success: true, skipped: true, videoId: videoId };
-      }
-
       // Extract transcript
       console.log('Social Media Note Saver: Extracting transcript for:', videoInfo.title);
       const transcript = await this.getYouTubeTranscript();
@@ -1241,9 +1235,6 @@ class SocialMediaSaver {
       if (!response.ok) {
         throw new Error(`API request failed: ${response.status} ${response.statusText}`);
       }
-
-      // Mark as imported
-      await markVideoImported(videoId);
 
       console.log('Social Media Note Saver: Successfully saved transcript for:', videoInfo.title);
       return {
@@ -2001,43 +1992,67 @@ class SocialMediaSaver {
 // Global instance
 let socialMediaSaver;
 
-// Listen for messages from popup
+// Listen for messages from popup and background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log('Social Media Note Saver: Received message:', message.action);
+
   if (message.action === 'extensionToggled') {
     if (socialMediaSaver) {
       socialMediaSaver.handleExtensionToggle(message.enabled);
     }
-  } else if (message.action === 'configUpdated') {
+    return false;
+  }
+
+  if (message.action === 'configUpdated') {
     if (socialMediaSaver) {
       socialMediaSaver.loadConfig();
     }
-  } else if (message.action === 'scrapeChannelVideos') {
-    // Handle channel video scraping
-    if (socialMediaSaver) {
-      socialMediaSaver.scrapeChannelVideos(message.limit || 20)
-        .then(videos => {
-          sendResponse({ success: true, videos: videos });
-        })
-        .catch(error => {
-          console.error('Social Media Note Saver: Error scraping videos:', error);
-          sendResponse({ success: false, error: error.message });
-        });
-      return true; // Keep message channel open for async response
-    }
-  } else if (message.action === 'extractAndSaveTranscript') {
-    // Handle transcript extraction and save
-    if (socialMediaSaver) {
-      socialMediaSaver.extractAndSaveTranscript()
-        .then(result => {
-          sendResponse(result);
-        })
-        .catch(error => {
-          console.error('Social Media Note Saver: Error in extractAndSaveTranscript:', error);
-          sendResponse({ success: false, error: error.message });
-        });
-      return true; // Keep message channel open for async response
-    }
+    return false;
   }
+
+  if (message.action === 'scrapeChannelVideos') {
+    console.log('Social Media Note Saver: Handling scrapeChannelVideos, limit:', message.limit);
+
+    if (!socialMediaSaver) {
+      console.error('Social Media Note Saver: socialMediaSaver not initialized');
+      sendResponse({ success: false, error: 'Content script not initialized' });
+      return true;
+    }
+
+    socialMediaSaver.scrapeChannelVideos(message.limit || 20)
+      .then(videos => {
+        console.log('Social Media Note Saver: Scraped videos, sending response:', videos.length);
+        sendResponse({ success: true, videos: videos });
+      })
+      .catch(error => {
+        console.error('Social Media Note Saver: Error scraping videos:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Keep message channel open for async response
+  }
+
+  if (message.action === 'extractAndSaveTranscript') {
+    console.log('Social Media Note Saver: Handling extractAndSaveTranscript');
+
+    if (!socialMediaSaver) {
+      console.error('Social Media Note Saver: socialMediaSaver not initialized');
+      sendResponse({ success: false, error: 'Content script not initialized' });
+      return true;
+    }
+
+    socialMediaSaver.extractAndSaveTranscript()
+      .then(result => {
+        console.log('Social Media Note Saver: extractAndSaveTranscript result:', result);
+        sendResponse(result);
+      })
+      .catch(error => {
+        console.error('Social Media Note Saver: Error in extractAndSaveTranscript:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Keep message channel open for async response
+  }
+
+  return false;
 });
 
 // Initialize when DOM is ready
