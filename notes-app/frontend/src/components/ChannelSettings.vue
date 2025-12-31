@@ -38,7 +38,7 @@
         </div>
 
         <div class="form-group">
-          <label>Summary Prompt:</label>
+          <label>Prompt Template:</label>
           <div class="prompt-template-row">
             <select v-model="importPromptTemplate" @change="onImportTemplateChange" :disabled="importing" class="template-select">
               <option value="default">Default</option>
@@ -48,18 +48,39 @@
               <option value="custom">Custom</option>
             </select>
           </div>
+        </div>
+
+        <div class="form-group">
+          <label>Prompt Text:</label>
           <div v-if="importPromptTemplate !== 'custom'" class="prompt-readonly">
-            {{ importPromptDisplay }}
+            {{ importPromptTextDisplay }}
           </div>
           <textarea
             v-else
-            v-model="importCustomPrompt"
-            placeholder="Enter your custom summary prompt. The transcript will be appended automatically."
-            rows="6"
+            v-model="importPromptText"
+            placeholder="Enter instructions for how to analyze and summarize the content..."
+            rows="4"
             :disabled="importing"
             class="prompt-textarea"
           ></textarea>
-          <p class="help-text">The video transcript will be appended when generating summaries.</p>
+        </div>
+
+        <div class="form-group">
+          <label>Output Schema (JSON):</label>
+          <div v-if="importPromptTemplate !== 'custom'" class="prompt-readonly schema-readonly">
+            {{ importPromptSchemaDisplay }}
+          </div>
+          <textarea
+            v-else
+            v-model="importPromptSchema"
+            placeholder='{"summary": "string", "key_points": ["string"]}'
+            rows="6"
+            :disabled="importing"
+            class="prompt-textarea schema-textarea"
+            @blur="schemaError = validateSchema(importPromptSchema) || ''"
+          ></textarea>
+          <p v-if="schemaError" class="schema-error">{{ schemaError }}</p>
+          <p class="help-text">Define the JSON structure for extracted data. Must include a "summary" field.</p>
         </div>
 
         <button
@@ -129,12 +150,21 @@
 
           <div v-if="expandedTemplate === template.channelName" class="template-content">
             <div class="form-group">
-              <label>Custom Prompt:</label>
+              <label>Prompt Text:</label>
               <textarea
-                v-model="editingTemplates[template.channelName]"
-                placeholder="Enter your custom summary prompt..."
-                rows="6"
+                v-model="editingTemplates[template.channelName].promptText"
+                placeholder="Enter instructions for how to analyze and summarize the content..."
+                rows="4"
                 class="prompt-textarea"
+              ></textarea>
+            </div>
+            <div class="form-group">
+              <label>Output Schema (JSON):</label>
+              <textarea
+                v-model="editingTemplates[template.channelName].promptSchema"
+                placeholder='{"summary": "string", "key_points": ["string"]}'
+                rows="6"
+                class="prompt-textarea schema-textarea"
               ></textarea>
             </div>
             <div class="template-actions">
@@ -185,14 +215,14 @@
             <span class="note-count">{{ channel.noteCount }} notes</span>
           </div>
           <div class="channel-status">
-            <span v-if="getChannelSetting(channel.name)?.summaryMode === 'custom'" class="custom-badge">Custom</span>
+            <span v-if="getChannelSetting(channel.name)?.promptText || getChannelSetting(channel.name)?.promptSchema" class="custom-badge">Custom</span>
             <span class="expand-icon">{{ expandedChannel === channel.name ? '▼' : '▶' }}</span>
           </div>
         </div>
 
         <div v-if="expandedChannel === channel.name" class="channel-settings-form">
           <div class="form-group">
-            <label>Summary Prompt:</label>
+            <label>Prompt Template:</label>
             <div class="prompt-template-row">
               <select
                 v-model="editingSettings[channel.name].templateSource"
@@ -210,17 +240,35 @@
                 <option value="custom">Custom</option>
               </select>
             </div>
+          </div>
+
+          <div class="form-group">
+            <label>Prompt Text:</label>
             <div v-if="editingSettings[channel.name].templateSource !== 'custom'" class="prompt-readonly">
-              {{ getChannelPromptDisplay(channel.name) }}
+              {{ getChannelPromptTextDisplay(channel.name) }}
             </div>
             <textarea
               v-else
-              v-model="editingSettings[channel.name].customPrompt"
-              placeholder="Enter your custom summary prompt. The transcript will be appended automatically."
-              rows="6"
+              v-model="editingSettings[channel.name].promptText"
+              placeholder="Enter instructions for how to analyze and summarize the content..."
+              rows="4"
               class="prompt-textarea"
             ></textarea>
-            <p class="help-text">The video transcript will be appended when generating summaries.</p>
+          </div>
+
+          <div class="form-group">
+            <label>Output Schema (JSON):</label>
+            <div v-if="editingSettings[channel.name].templateSource !== 'custom'" class="prompt-readonly schema-readonly">
+              {{ getChannelPromptSchemaDisplay(channel.name) }}
+            </div>
+            <textarea
+              v-else
+              v-model="editingSettings[channel.name].promptSchema"
+              placeholder='{"summary": "string", "key_points": ["string"]}'
+              rows="6"
+              class="prompt-textarea schema-textarea"
+            ></textarea>
+            <p class="help-text">Define the JSON structure for extracted data. Must include a "summary" field.</p>
           </div>
 
           <div class="form-actions">
@@ -287,20 +335,12 @@ import axios from 'axios'
 const API_URL = process.env.VUE_APP_API_URL || 'http://localhost:8080'
 const EXTENSION_ID = 'koodfochknchgnegkcmcfcidkfgdfgkc'
 
-const DEFAULT_PROMPT = `Please provide a concise and well-formatted summary of the following content. The summary should:
+const DEFAULT_PROMPT_TEXT = `Analyze this content and extract structured information.`
 
-1. Be concise and to-the-point - avoid unnecessary words
-2. If the content includes lists or multiple points, clearly outline each point with bullet points or numbered lists
-3. Use proper spacing with line breaks between different sections or topics
-4. Structure the information logically with clear paragraphs
-5. Capture the key takeaways and main ideas
-6. If there are actionable items or recommendations, list them clearly
-7. Maintain the essential context but eliminate redundancy
-
-Format your response with:
-- Clear paragraph breaks between different topics
-- Bullet points (•) or numbered lists when covering multiple items
-- Proper spacing for readability`
+const DEFAULT_PROMPT_SCHEMA = `{
+  "summary": "string",
+  "key_points": ["string"]
+}`
 
 export default {
   name: 'ChannelSettings',
@@ -327,7 +367,9 @@ export default {
       importChannelUrl: '',
       importVideoLimit: '20',
       importPromptTemplate: 'default',
-      importCustomPrompt: '',
+      importPromptText: '',
+      importPromptSchema: '',
+      schemaError: '',
       importProgress: {
         active: false,
         current: 0,
@@ -345,29 +387,40 @@ export default {
   },
   computed: {
     savedTemplates() {
-      // Return all saved channel settings as an array
-      return Object.values(this.channelSettings).filter(s => s && s.customPrompt)
+      // Return all saved channel settings as an array (those with promptText or promptSchema)
+      return Object.values(this.channelSettings).filter(s => s && (s.promptText || s.promptSchema))
     },
     channelsWithCustomPrompts() {
       return this.channels.filter(ch => {
         const settings = this.channelSettings[ch.name]
-        return settings && settings.customPrompt && settings.customPrompt.trim() !== ''
+        return settings && (settings.promptText || settings.promptSchema)
       })
     },
     importProgressPercentage() {
       if (this.importProgress.total === 0) return 0
       return Math.round((this.importProgress.current / this.importProgress.total) * 100)
     },
-    importPromptDisplay() {
+    importPromptTextDisplay() {
       if (this.importPromptTemplate === 'default') {
-        return DEFAULT_PROMPT
+        return DEFAULT_PROMPT_TEXT
       } else if (this.importPromptTemplate !== 'custom') {
         const sourceSettings = this.channelSettings[this.importPromptTemplate]
-        if (sourceSettings && sourceSettings.customPrompt) {
-          return sourceSettings.customPrompt
+        if (sourceSettings && sourceSettings.promptText) {
+          return sourceSettings.promptText
         }
       }
-      return DEFAULT_PROMPT
+      return DEFAULT_PROMPT_TEXT
+    },
+    importPromptSchemaDisplay() {
+      if (this.importPromptTemplate === 'default') {
+        return DEFAULT_PROMPT_SCHEMA
+      } else if (this.importPromptTemplate !== 'custom') {
+        const sourceSettings = this.channelSettings[this.importPromptTemplate]
+        if (sourceSettings && sourceSettings.promptSchema) {
+          return sourceSettings.promptSchema
+        }
+      }
+      return DEFAULT_PROMPT_SCHEMA
     }
   },
   async mounted() {
@@ -403,19 +456,23 @@ export default {
         this.editingSettings = {}
         for (const channel of this.channels) {
           const existing = this.channelSettings[channel.name]
-          const hasCustomPrompt = existing?.customPrompt && existing.customPrompt.trim() !== ''
+          const hasCustomPrompt = existing?.promptText || existing?.promptSchema
           this.editingSettings[channel.name] = {
             // If channel has custom prompt, show as "custom", otherwise "default"
             templateSource: hasCustomPrompt ? 'custom' : 'default',
-            customPrompt: hasCustomPrompt ? existing.customPrompt : ''
+            promptText: existing?.promptText || '',
+            promptSchema: existing?.promptSchema || ''
           }
         }
 
         // Initialize editing state for templates
         this.editingTemplates = {}
         for (const s of settings) {
-          if (s.customPrompt) {
-            this.editingTemplates[s.channelName] = s.customPrompt
+          if (s.promptText || s.promptSchema) {
+            this.editingTemplates[s.channelName] = {
+              promptText: s.promptText || '',
+              promptSchema: s.promptSchema || ''
+            }
           }
         }
       } catch (error) {
@@ -441,18 +498,30 @@ export default {
     async saveTemplate(channelName) {
       this.savingTemplate = channelName
       try {
-        const prompt = this.editingTemplates[channelName]
+        const template = this.editingTemplates[channelName]
+
+        // Validate schema if provided
+        if (template.promptSchema && template.promptSchema.trim()) {
+          const schemaError = this.validateSchema(template.promptSchema)
+          if (schemaError) {
+            alert('Invalid JSON schema: ' + schemaError)
+            this.savingTemplate = null
+            return
+          }
+        }
+
         await axios.put(`${API_URL}/channel-settings/${encodeURIComponent(channelName)}`, {
           platform: this.channelSettings[channelName]?.platform || 'youtube',
-          summaryMode: 'custom',
-          customPrompt: prompt
+          promptText: template.promptText,
+          promptSchema: template.promptSchema
         })
 
         // Update local cache
         this.channelSettings[channelName] = {
           ...this.channelSettings[channelName],
           channelName: channelName,
-          customPrompt: prompt
+          promptText: template.promptText,
+          promptSchema: template.promptSchema
         }
       } catch (error) {
         console.error('Failed to save template:', error)
@@ -487,35 +556,65 @@ export default {
       return this.channels.filter(ch => {
         if (ch.name === currentChannel) return false
         const settings = this.channelSettings[ch.name]
-        return settings && settings.customPrompt && settings.customPrompt.trim() !== ''
+        return settings && (settings.promptText || settings.promptSchema)
       })
     },
 
-    getChannelPromptDisplay(channelName) {
+    getChannelPromptTextDisplay(channelName) {
       const templateSource = this.editingSettings[channelName]?.templateSource
       if (templateSource === 'default') {
-        return DEFAULT_PROMPT
+        return DEFAULT_PROMPT_TEXT
       } else if (templateSource && templateSource !== 'custom') {
         const sourceSettings = this.channelSettings[templateSource]
-        if (sourceSettings && sourceSettings.customPrompt) {
-          return sourceSettings.customPrompt
+        if (sourceSettings && sourceSettings.promptText) {
+          return sourceSettings.promptText
         }
       }
-      return DEFAULT_PROMPT
+      return DEFAULT_PROMPT_TEXT
+    },
+
+    getChannelPromptSchemaDisplay(channelName) {
+      const templateSource = this.editingSettings[channelName]?.templateSource
+      if (templateSource === 'default') {
+        return DEFAULT_PROMPT_SCHEMA
+      } else if (templateSource && templateSource !== 'custom') {
+        const sourceSettings = this.channelSettings[templateSource]
+        if (sourceSettings && sourceSettings.promptSchema) {
+          return sourceSettings.promptSchema
+        }
+      }
+      return DEFAULT_PROMPT_SCHEMA
+    },
+
+    validateSchema(schemaString) {
+      if (!schemaString || !schemaString.trim()) {
+        return null // Empty is valid (optional)
+      }
+      try {
+        JSON.parse(schemaString)
+        return null // Valid JSON
+      } catch (e) {
+        return e.message
+      }
     },
 
     onImportTemplateChange() {
       // When switching to custom, initialize with empty or keep existing
-      if (this.importPromptTemplate === 'custom' && !this.importCustomPrompt) {
-        this.importCustomPrompt = ''
+      if (this.importPromptTemplate === 'custom') {
+        if (!this.importPromptText) this.importPromptText = ''
+        if (!this.importPromptSchema) this.importPromptSchema = ''
       }
+      this.schemaError = ''
     },
 
     onChannelTemplateChange(channelName) {
       // When switching to custom, initialize with empty if not already set
       if (this.editingSettings[channelName].templateSource === 'custom') {
-        if (!this.editingSettings[channelName].customPrompt) {
-          this.editingSettings[channelName].customPrompt = ''
+        if (!this.editingSettings[channelName].promptText) {
+          this.editingSettings[channelName].promptText = ''
+        }
+        if (!this.editingSettings[channelName].promptSchema) {
+          this.editingSettings[channelName].promptSchema = ''
         }
       }
     },
@@ -556,22 +655,26 @@ export default {
 
       this.refreshingSummary = channel.name
       try {
-        // Determine which prompt to use based on template selection
+        // Determine which prompt/schema to use based on template selection
         const settings = this.editingSettings[channel.name]
-        let customPrompt = ''
+        let promptText = ''
+        let promptSchema = ''
 
         if (settings.templateSource === 'custom') {
-          customPrompt = settings.customPrompt
+          promptText = settings.promptText
+          promptSchema = settings.promptSchema
         } else if (settings.templateSource !== 'default') {
           const sourceSettings = this.channelSettings[settings.templateSource]
-          if (sourceSettings && sourceSettings.customPrompt) {
-            customPrompt = sourceSettings.customPrompt
+          if (sourceSettings) {
+            promptText = sourceSettings.promptText || ''
+            promptSchema = sourceSettings.promptSchema || ''
           }
         }
-        // If default, customPrompt stays empty and backend uses default
+        // If default, both stay empty and backend uses defaults
 
         await axios.post(`${API_URL}/summarize/${noteId}`, {
-          customPrompt: customPrompt
+          promptText: promptText,
+          promptSchema: promptSchema
         })
 
         // Reload notes to get updated summary
@@ -593,34 +696,44 @@ export default {
       try {
         const settings = this.editingSettings[channel.name]
 
-        // Determine which prompt to save based on template selection
-        let promptToSave = ''
-        let modeToSave = 'default'
+        // Determine which prompt/schema to save based on template selection
+        let promptTextToSave = ''
+        let promptSchemaToSave = ''
 
         if (settings.templateSource === 'custom') {
-          promptToSave = settings.customPrompt
-          modeToSave = 'custom'
+          promptTextToSave = settings.promptText
+          promptSchemaToSave = settings.promptSchema
+
+          // Validate schema if provided
+          if (promptSchemaToSave && promptSchemaToSave.trim()) {
+            const schemaError = this.validateSchema(promptSchemaToSave)
+            if (schemaError) {
+              alert('Invalid JSON schema: ' + schemaError)
+              this.saving = null
+              return
+            }
+          }
         } else if (settings.templateSource !== 'default') {
-          // Copying from another channel - save that prompt
+          // Copying from another channel - save that prompt/schema
           const sourceSettings = this.channelSettings[settings.templateSource]
-          if (sourceSettings && sourceSettings.customPrompt) {
-            promptToSave = sourceSettings.customPrompt
-            modeToSave = 'custom'
+          if (sourceSettings) {
+            promptTextToSave = sourceSettings.promptText || ''
+            promptSchemaToSave = sourceSettings.promptSchema || ''
           }
         }
 
         await axios.put(`${API_URL}/channel-settings/${encodeURIComponent(channel.name)}`, {
           platform: channel.platform,
-          summaryMode: modeToSave,
-          customPrompt: promptToSave
+          promptText: promptTextToSave,
+          promptSchema: promptSchemaToSave
         })
 
         // Update local cache
         this.channelSettings[channel.name] = {
           channelName: channel.name,
           platform: channel.platform,
-          summaryMode: modeToSave,
-          customPrompt: promptToSave
+          promptText: promptTextToSave,
+          promptSchema: promptSchemaToSave
         }
 
         this.savedChannel = channel.name
@@ -720,23 +833,37 @@ export default {
         return
       }
 
-      // Determine which prompt to use based on template selection
-      let promptToUse = ''
+      // Determine which prompt/schema to use based on template selection
+      let promptTextToUse = ''
+      let promptSchemaToUse = ''
+
       if (this.importPromptTemplate === 'custom') {
-        promptToUse = this.importCustomPrompt
+        promptTextToUse = this.importPromptText
+        promptSchemaToUse = this.importPromptSchema
+
+        // Validate schema if provided
+        if (promptSchemaToUse && promptSchemaToUse.trim()) {
+          const schemaError = this.validateSchema(promptSchemaToUse)
+          if (schemaError) {
+            this.importMessage = 'Invalid JSON schema: ' + schemaError
+            this.importMessageType = 'error'
+            return
+          }
+        }
       } else if (this.importPromptTemplate !== 'default') {
-        // Using another channel's prompt
+        // Using another channel's prompt/schema
         const sourceSettings = this.channelSettings[this.importPromptTemplate]
-        if (sourceSettings && sourceSettings.customPrompt) {
-          promptToUse = sourceSettings.customPrompt
+        if (sourceSettings) {
+          promptTextToUse = sourceSettings.promptText || ''
+          promptSchemaToUse = sourceSettings.promptSchema || ''
         }
       }
-      // If default or empty, promptToUse stays empty (backend uses default)
+      // If default or empty, both stay empty (backend uses defaults)
 
-      // Store the prompt to be applied after first video is imported
+      // Store the prompt/schema to be applied after first video is imported
       this.pendingImportPrompt = {
-        mode: promptToUse ? 'custom' : 'default',
-        prompt: promptToUse
+        promptText: promptTextToUse,
+        promptSchema: promptSchemaToUse
       }
 
       this.importing = true
@@ -776,8 +903,8 @@ export default {
         try {
           await axios.put(`${API_URL}/channel-settings/${encodeURIComponent(channelName)}`, {
             platform: 'youtube',
-            summaryMode: this.pendingImportPrompt.mode,
-            customPrompt: this.pendingImportPrompt.prompt
+            promptText: this.pendingImportPrompt.promptText,
+            promptSchema: this.pendingImportPrompt.promptSchema
           })
           console.log('Saved channel settings for:', channelName)
         } catch (err) {
@@ -950,8 +1077,21 @@ export default {
   line-height: 1.5;
   color: #555;
   white-space: pre-wrap;
-  max-height: 200px;
+  max-height: 150px;
   overflow-y: auto;
+}
+
+.schema-readonly,
+.schema-textarea {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 12px;
+}
+
+.schema-error {
+  color: #dc3545;
+  font-size: 13px;
+  margin-top: 4px;
+  margin-bottom: 0;
 }
 
 .copy-channel-select {
