@@ -2,7 +2,7 @@
 
 const templates = {
   simple: {
-    content: 'This post is from: {{author}} ({{handle}}) on {{platform}}\n\n{{shareContext}}{{content}}\n\nSource: {{url}}',
+    content: '{{content}}',
     metadata: {
       author: '{{author}}',
       handle: '{{handle}}',
@@ -16,7 +16,7 @@ const templates = {
     }
   },
   notes: {
-    content: 'This post is from: {{author}} ({{handle}}) on {{platform}}\n\n{{shareContext}}{{content}}\n\nSource: {{url}}'
+    content: '{{content}}'
   },
   rich: {
     title: 'Post from {{author}} ({{handle}}) on {{platform}}',

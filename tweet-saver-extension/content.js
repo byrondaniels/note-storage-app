@@ -1,6 +1,32 @@
 // Social Media Note Saver - Content Script
 // Runs on supported social media platforms to inject save buttons
 
+// Storage helpers for tracking imported videos
+async function isVideoImported(videoId) {
+  try {
+    const result = await chrome.storage.local.get(['importedVideoIds']);
+    const importedIds = result.importedVideoIds || [];
+    return importedIds.includes(videoId);
+  } catch (error) {
+    console.error('Social Media Note Saver: Error checking if video imported:', error);
+    return false;
+  }
+}
+
+async function markVideoImported(videoId) {
+  try {
+    const result = await chrome.storage.local.get(['importedVideoIds']);
+    const importedIds = result.importedVideoIds || [];
+    if (!importedIds.includes(videoId)) {
+      importedIds.push(videoId);
+      await chrome.storage.local.set({ importedVideoIds: importedIds });
+      console.log('Social Media Note Saver: Marked video as imported:', videoId);
+    }
+  } catch (error) {
+    console.error('Social Media Note Saver: Error marking video imported:', error);
+  }
+}
+
 class SocialMediaSaver {
   constructor() {
     this.config = null;
@@ -49,7 +75,7 @@ class SocialMediaSaver {
         extensionEnabled: true,
         apiEndpoint: 'http://localhost:8080/notes',
         payloadTemplate: {
-          content: 'This post is from: {{author}} ({{handle}}) on {{platform}}\n\n{{shareContext}}{{content}}\n\nSource: {{url}}',
+          content: '{{content}}',
           metadata: {
             author: '{{author}}',
             handle: '{{handle}}',
@@ -72,7 +98,7 @@ class SocialMediaSaver {
         extensionEnabled: true,
         apiEndpoint: 'http://localhost:8080/notes',
         payloadTemplate: {
-          content: 'This post is from: {{author}} ({{handle}}) on {{platform}}\n\n{{shareContext}}{{content}}\n\nSource: {{url}}',
+          content: '{{content}}',
           metadata: {
             author: '{{author}}',
             handle: '{{handle}}',
@@ -923,25 +949,30 @@ class SocialMediaSaver {
 
   async getYouTubeTranscript() {
     console.log('Social Media Note Saver: Attempting to extract YouTube transcript...');
-    
+
     try {
       // First, try to find and click the transcript button to open it
       const transcriptButton = await this.findAndClickTranscriptButton();
       if (!transcriptButton) {
         throw new Error('Could not find transcript button - transcript may not be available');
       }
-      
-      // Wait for transcript panel to load
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
+
+      // Wait 5 seconds for transcript panel to load
+      console.log('Social Media Note Saver: Waiting 5 seconds for transcript to load...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
       // Extract transcript segments
       const transcriptSegments = await this.extractTranscriptSegments();
       if (!transcriptSegments || transcriptSegments.length === 0) {
         throw new Error('No transcript segments found');
       }
-      
-      return transcriptSegments.join('\n');
-      
+
+      // Join segments with spaces for natural flow, clean up extra whitespace
+      return transcriptSegments
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
     } catch (error) {
       console.error('Social Media Note Saver: Transcript extraction failed:', error);
       throw error;
@@ -959,7 +990,7 @@ class SocialMediaSaver {
       '#description button:has-text("Show transcript")',
       'button:has-text("Show transcript")'
     ];
-    
+
     for (const selector of transcriptSelectors) {
       try {
         // Handle special :has-text selector
@@ -985,14 +1016,14 @@ class SocialMediaSaver {
         console.log('Social Media Note Saver: Error with selector', selector, error);
       }
     }
-    
+
     // Try looking in description expand area
     const showMoreButton = document.querySelector('#description button[aria-label*="more" i], #expand');
     if (showMoreButton) {
       console.log('Social Media Note Saver: Expanding description to look for transcript');
       showMoreButton.click();
       await new Promise(resolve => setTimeout(resolve, 500));
-      
+
       // Try transcript selectors again
       for (const selector of transcriptSelectors) {
         const button = document.querySelector(selector);
@@ -1003,43 +1034,65 @@ class SocialMediaSaver {
         }
       }
     }
-    
+
     return null;
   }
 
   async extractTranscriptSegments() {
     // Wait a bit longer for transcript panel to fully load
     await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    const segmentSelectors = [
-      'ytd-transcript-segment-renderer',
-      '.ytd-transcript-segment-renderer',
-      '[role="button"]:has(.segment-timestamp)',
-      '.transcript-segment',
-      'cue'
-    ];
-    
+
     let segments = [];
-    
-    for (const selector of segmentSelectors) {
-      const elements = document.querySelectorAll(selector);
-      console.log(`Social Media Note Saver: Found ${elements.length} segments with selector: ${selector}`);
-      
-      if (elements.length > 0) {
-        for (const element of elements) {
-          const textElement = element.querySelector('.segment-text, [class*="text"], [class*="cue"]') || element;
-          const text = textElement.textContent?.trim();
-          if (text && text.length > 0) {
-            segments.push(text);
-          }
-        }
-        
-        if (segments.length > 0) {
-          break;
+
+    // Try to get transcript segment text elements directly (avoiding timestamps)
+    const segmentTextElements = document.querySelectorAll('ytd-transcript-segment-renderer .segment-text');
+    console.log(`Social Media Note Saver: Found ${segmentTextElements.length} segment-text elements`);
+
+    if (segmentTextElements.length > 0) {
+      for (const element of segmentTextElements) {
+        const text = element.textContent?.trim();
+        if (text && text.length > 0) {
+          segments.push(text);
         }
       }
     }
-    
+
+    // Fallback: try other selectors if direct approach didn't work
+    if (segments.length === 0) {
+      const segmentSelectors = [
+        'ytd-transcript-segment-renderer',
+        '.ytd-transcript-segment-renderer',
+        '.transcript-segment',
+        'cue'
+      ];
+
+      for (const selector of segmentSelectors) {
+        const elements = document.querySelectorAll(selector);
+        console.log(`Social Media Note Saver: Found ${elements.length} segments with selector: ${selector}`);
+
+        if (elements.length > 0) {
+          for (const element of elements) {
+            // Skip timestamp elements, only get text
+            const textElement = element.querySelector('.segment-text') ||
+                               element.querySelector('[class*="cue-text"]') ||
+                               element.querySelector('yt-formatted-string:not(.segment-timestamp)');
+
+            if (textElement) {
+              const text = textElement.textContent?.trim();
+              // Filter out timestamp patterns (e.g., "0:00", "12:34")
+              if (text && text.length > 0 && !/^\d+:\d+$/.test(text)) {
+                segments.push(text);
+              }
+            }
+          }
+
+          if (segments.length > 0) {
+            break;
+          }
+        }
+      }
+    }
+
     // If no structured segments found, try to get all text from transcript area
     if (segments.length === 0) {
       const transcriptAreas = [
@@ -1048,7 +1101,7 @@ class SocialMediaSaver {
         '[aria-label*="transcript" i]',
         '.transcript-content'
       ];
-      
+
       for (const selector of transcriptAreas) {
         const area = document.querySelector(selector);
         if (area) {
@@ -1061,13 +1114,15 @@ class SocialMediaSaver {
         }
       }
     }
-    
+
     return segments;
   }
 
   getYouTubeVideoInfo() {
     const videoTitle = document.querySelector('#title h1, .title, .watch-main-col .watch-title')?.textContent?.trim() || 'Unknown Title';
-    const channelName = document.querySelector('#channel-name, .ytd-channel-name, .watch-info-content .g-hovercard')?.textContent?.trim() || 'Unknown Channel';
+    // Use more specific selector to avoid duplicate text - get the innermost text element
+    const channelElement = document.querySelector('#channel-name a, #channel-name yt-formatted-string, ytd-channel-name yt-formatted-string a, .ytd-channel-name a');
+    const channelName = channelElement?.textContent?.trim() || 'Unknown Channel';
     const videoUrl = window.location.href.split('&')[0]; // Remove extra parameters
     
     // Handle both regular videos (/watch?v=) and live streams (/live/)
@@ -1095,6 +1150,134 @@ class SocialMediaSaver {
     }
     // Always use the video ID if available, or fallback to a static ID for the current page
     return videoId || `youtube-${window.location.pathname}`;
+  }
+
+  // Channel import functionality
+  async scrapeChannelVideos(limit = 20) {
+    console.log('Social Media Note Saver: Scraping channel videos, limit:', limit);
+
+    // Wait for page to load
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Scroll to load more videos
+    console.log('Social Media Note Saver: Scrolling to load videos...');
+    for (let i = 0; i < 3; i++) {
+      window.scrollTo(0, document.body.scrollHeight);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    // Find all video links on the page
+    const videoLinks = document.querySelectorAll('a[href*="/watch?v="]');
+    console.log('Social Media Note Saver: Found', videoLinks.length, 'video links');
+
+    const videos = [];
+    const seenVideoIds = new Set();
+
+    for (const link of videoLinks) {
+      const href = link.getAttribute('href');
+
+      // Filter out shorts
+      if (href.includes('/shorts/')) {
+        continue;
+      }
+
+      // Extract video ID
+      const match = href.match(/[?&]v=([^&]+)/);
+      if (!match) continue;
+
+      const videoId = match[1];
+
+      // Skip duplicates
+      if (seenVideoIds.has(videoId)) continue;
+      seenVideoIds.add(videoId);
+
+      // Extract title (try different selectors)
+      let title = 'Unknown Title';
+      const titleElement = link.querySelector('#video-title, .ytd-video-renderer #video-title');
+      if (titleElement) {
+        title = titleElement.getAttribute('title') || titleElement.textContent.trim();
+      }
+
+      videos.push({
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+        videoId: videoId,
+        title: title
+      });
+
+      // Stop if we've hit the limit
+      if (videos.length >= limit) {
+        break;
+      }
+    }
+
+    console.log('Social Media Note Saver: Scraped', videos.length, 'videos (limit:', limit, ')');
+    return videos;
+  }
+
+  async extractAndSaveTranscript() {
+    console.log('Social Media Note Saver: Extracting and saving transcript...');
+
+    try {
+      // Get video info
+      const videoInfo = this.getYouTubeVideoInfo();
+      const videoId = videoInfo.videoId;
+
+      if (!videoId) {
+        throw new Error('Could not determine video ID');
+      }
+
+      // Extract transcript
+      console.log('Social Media Note Saver: Extracting transcript for:', videoInfo.title);
+      const transcript = await this.getYouTubeTranscript();
+
+      if (!transcript || transcript.length === 0) {
+        throw new Error('No transcript available for this video');
+      }
+
+      // Build payload
+      const postData = {
+        content: transcript,
+        author: videoInfo.channel,
+        handle: `@${videoInfo.channel}`,
+        url: videoInfo.url,
+        timestamp: new Date().toISOString(),
+        platform: 'youtube',
+        isShare: false,
+        sharedBy: '',
+        shareContext: '',
+        metrics: {}
+      };
+
+      const payload = this.buildPayload(postData);
+
+      // Send to API
+      console.log('Social Media Note Saver: Sending to API...');
+      const response = await fetch(this.config.apiEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+      }
+
+      console.log('Social Media Note Saver: Successfully saved transcript for:', videoInfo.title);
+      return {
+        success: true,
+        videoId: videoId,
+        title: videoInfo.title
+      };
+
+    } catch (error) {
+      console.error('Social Media Note Saver: Failed to extract/save transcript:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
   }
 
   // Twitter-specific implementations below
@@ -1837,17 +2020,67 @@ class SocialMediaSaver {
 // Global instance
 let socialMediaSaver;
 
-// Listen for messages from popup
+// Listen for messages from popup and background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log('Social Media Note Saver: Received message:', message.action);
+
   if (message.action === 'extensionToggled') {
     if (socialMediaSaver) {
       socialMediaSaver.handleExtensionToggle(message.enabled);
     }
-  } else if (message.action === 'configUpdated') {
+    return false;
+  }
+
+  if (message.action === 'configUpdated') {
     if (socialMediaSaver) {
       socialMediaSaver.loadConfig();
     }
+    return false;
   }
+
+  if (message.action === 'scrapeChannelVideos') {
+    console.log('Social Media Note Saver: Handling scrapeChannelVideos, limit:', message.limit);
+
+    if (!socialMediaSaver) {
+      console.error('Social Media Note Saver: socialMediaSaver not initialized');
+      sendResponse({ success: false, error: 'Content script not initialized' });
+      return true;
+    }
+
+    socialMediaSaver.scrapeChannelVideos(message.limit || 20)
+      .then(videos => {
+        console.log('Social Media Note Saver: Scraped videos, sending response:', videos.length);
+        sendResponse({ success: true, videos: videos });
+      })
+      .catch(error => {
+        console.error('Social Media Note Saver: Error scraping videos:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Keep message channel open for async response
+  }
+
+  if (message.action === 'extractAndSaveTranscript') {
+    console.log('Social Media Note Saver: Handling extractAndSaveTranscript');
+
+    if (!socialMediaSaver) {
+      console.error('Social Media Note Saver: socialMediaSaver not initialized');
+      sendResponse({ success: false, error: 'Content script not initialized' });
+      return true;
+    }
+
+    socialMediaSaver.extractAndSaveTranscript()
+      .then(result => {
+        console.log('Social Media Note Saver: extractAndSaveTranscript result:', result);
+        sendResponse(result);
+      })
+      .catch(error => {
+        console.error('Social Media Note Saver: Error in extractAndSaveTranscript:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Keep message channel open for async response
+  }
+
+  return false;
 });
 
 // Initialize when DOM is ready

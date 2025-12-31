@@ -115,29 +115,73 @@
             <p>No notes found for "{{ searchQuery }}"</p>
             <button @click="clearSearch" class="clear-search-link">Show all notes</button>
           </div>
-          
-          <!-- Notes List -->
-          <div 
-            v-for="note in displayedNotes" 
-            :key="note.id" 
-            class="note-item"
-            :class="{ 'active': selectedNote && selectedNote.id === note.id }"
-            @click="selectNote(note)"
-            tabindex="0"
-          >
-            <div class="note-item-header">
-              <h3 class="note-title">{{ note.title }}</h3>
-              <div class="note-badges">
-                <span v-if="note.category" class="category-badge">{{ formatCategoryName(note.category) }}</span>
-                <span v-if="note.metadata && note.metadata.platform" class="source-badge">{{ getSourceLabel(note.metadata.platform) }}</span>
+
+          <!-- Grouped Notes View -->
+          <template v-if="groupByChannel && groupedNotes">
+            <div v-for="group in groupedNotes" :key="group.name" class="channel-group">
+              <div
+                class="channel-header"
+                @click="toggleChannel(group.name)"
+                :class="{ 'collapsed': !isChannelExpanded(group.name) }"
+              >
+                <span class="channel-expand-icon">{{ isChannelExpanded(group.name) ? '▼' : '▶' }}</span>
+                <span v-if="group.platform" class="channel-platform-icon">
+                  {{ group.platform === 'youtube' ? '📺' : group.platform === 'twitter' ? '🐦' : group.platform === 'linkedin' ? '💼' : '📝' }}
+                </span>
+                <span class="channel-name">{{ group.name }}</span>
+                <span class="channel-count">{{ group.notes.length }}</span>
+              </div>
+              <transition name="collapse">
+                <div v-show="isChannelExpanded(group.name)" class="channel-notes">
+                  <div
+                    v-for="note in group.notes"
+                    :key="note.id"
+                    class="note-item grouped"
+                    :class="{ 'active': selectedNote && selectedNote.id === note.id }"
+                    @click="selectNote(note)"
+                    tabindex="0"
+                  >
+                    <div class="note-item-header">
+                      <h3 class="note-title">{{ note.title }}</h3>
+                      <div class="note-badges">
+                        <span v-if="note.category" class="category-badge">{{ formatCategoryName(note.category) }}</span>
+                      </div>
+                    </div>
+                    <p class="note-preview">{{ getPreview(note.content) }}</p>
+                    <div class="note-meta">
+                      <span class="note-date">{{ formatDate(note.created) }}</span>
+                      <span v-if="note.score" class="relevance-score">{{ Math.round(note.score * 100) }}% match</span>
+                    </div>
+                  </div>
+                </div>
+              </transition>
+            </div>
+          </template>
+
+          <!-- Flat Notes List -->
+          <template v-else>
+            <div
+              v-for="note in displayedNotes"
+              :key="note.id"
+              class="note-item"
+              :class="{ 'active': selectedNote && selectedNote.id === note.id }"
+              @click="selectNote(note)"
+              tabindex="0"
+            >
+              <div class="note-item-header">
+                <h3 class="note-title">{{ note.title }}</h3>
+                <div class="note-badges">
+                  <span v-if="note.category" class="category-badge">{{ formatCategoryName(note.category) }}</span>
+                  <span v-if="note.metadata && note.metadata.platform" class="source-badge">{{ getSourceLabel(note.metadata.platform) }}</span>
+                </div>
+              </div>
+              <p class="note-preview">{{ getPreview(note.content) }}</p>
+              <div class="note-meta">
+                <span class="note-date">{{ formatDate(note.created) }}</span>
+                <span v-if="note.score" class="relevance-score">{{ Math.round(note.score * 100) }}% match</span>
               </div>
             </div>
-            <p class="note-preview">{{ getPreview(note.content) }}</p>
-            <div class="note-meta">
-              <span class="note-date">{{ formatDate(note.created) }}</span>
-              <span v-if="note.score" class="relevance-score">{{ Math.round(note.score * 100) }}% match</span>
-            </div>
-          </div>
+          </template>
         </div>
       </div>
       
@@ -154,8 +198,6 @@
           <div class="note-detail-header">
             <div class="note-title-section">
               <h1 class="note-detail-title">{{ selectedNote.title }}</h1>
-              {{ console.log('DEBUG: selectedNote =', selectedNote) }}
-              {{ console.log('DEBUG: metadata =', selectedNote.metadata) }}
               <div v-if="selectedNote.metadata && (selectedNote.metadata.platform || selectedNote.metadata.url)" class="note-source">
                 <span class="source-label">Source:</span>
                 <span class="source-platform">
@@ -175,10 +217,6 @@
             </div>
             
             <div class="note-actions">
-              <button @click="enterEditMode" class="action-btn edit-btn" title="Edit note">
-                <span class="action-icon">✏️</span>
-                Edit
-              </button>
               <button @click="openAIModal" class="action-btn ai-btn" title="Ask AI about this note">
                 <span class="action-icon">🤖</span>
                 AI Questions
@@ -389,10 +427,39 @@ export default {
       aiLoading: false,
       // Summarization functionality
       summarizing: false,
-      currentView: 'full' // 'full' or 'summary'
+      currentView: 'summary', // 'full' or 'summary' - default to summary
+      // Grouping functionality
+      groupByChannel: true, // Always group by channel
+      expandedChannels: {} // Track which channels are expanded
     }
   },
   computed: {
+    groupedNotes() {
+      const notes = this.displayedNotes
+      if (!this.groupByChannel || notes.length === 0) {
+        return null
+      }
+
+      const groups = {}
+      for (const note of notes) {
+        const channel = note.metadata?.author || 'Other Notes'
+        if (!groups[channel]) {
+          groups[channel] = {
+            name: channel,
+            platform: note.metadata?.platform || null,
+            notes: []
+          }
+        }
+        groups[channel].notes.push(note)
+      }
+
+      // Sort groups: channels with most notes first, "Other Notes" last
+      return Object.values(groups).sort((a, b) => {
+        if (a.name === 'Other Notes') return 1
+        if (b.name === 'Other Notes') return -1
+        return b.notes.length - a.notes.length
+      })
+    },
     displayedNotes() {
       if (this.searchQuery && this.searchResults.length > 0) {
         // Return search results with score information
@@ -911,6 +978,17 @@ export default {
         default: return 'Custom'
       }
     },
+    // Channel grouping methods
+    toggleChannel(channelName) {
+      this.expandedChannels = {
+        ...this.expandedChannels,
+        [channelName]: !this.isChannelExpanded(channelName)
+      }
+    },
+    isChannelExpanded(channelName) {
+      // Default to expanded if not explicitly set
+      return this.expandedChannels[channelName] !== false
+    },
     // AI Questions functionality
     openAIModal() {
       this.showAIModal = true
@@ -1094,6 +1172,26 @@ export default {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.group-btn {
+  background: none;
+  border: 1px solid #d1d1d6;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.group-btn:hover {
+  background-color: #f0f0f0;
+  border-color: #007AFF;
+}
+
+.group-btn.active {
+  background-color: #007AFF;
+  border-color: #007AFF;
 }
 
 .new-note-btn {
@@ -1430,7 +1528,92 @@ export default {
 .notes-list {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 0;
+  padding: 0;
+}
+
+/* Channel grouping styles */
+.channel-group {
+  margin-bottom: 0;
+}
+
+.channel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.channel-header:hover {
+  background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%);
+}
+
+.channel-header.collapsed {
+  opacity: 0.85;
+}
+
+.channel-expand-icon {
+  font-size: 10px;
+  transition: transform 0.2s;
+  width: 14px;
+}
+
+.channel-platform-icon {
+  font-size: 16px;
+}
+
+.channel-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.channel-count {
+  background: rgba(255, 255, 255, 0.2);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.note-item.grouped {
+  padding-left: 32px;
+  border-left: 3px solid #e5e5e5;
+  margin-left: 10px;
+}
+
+.note-item.grouped:hover {
+  border-left-color: #007AFF;
+}
+
+.note-item.grouped.active {
+  border-left-color: white;
+}
+
+/* Collapse animation */
+.channel-notes {
+  overflow: hidden;
+}
+
+.collapse-enter-active,
+.collapse-leave-active {
+  transition: all 0.3s ease;
+  max-height: 2000px;
+}
+
+.collapse-enter-from,
+.collapse-leave-to {
+  max-height: 0;
+  opacity: 0;
 }
 
 .note-item {

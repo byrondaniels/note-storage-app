@@ -3,6 +3,7 @@
     <nav>
       <router-link to="/view">View Notes</router-link>
       <router-link to="/ask">Ask AI</router-link>
+      <router-link to="/settings">Settings</router-link>
     </nav>
     <router-view/>
   </div>
