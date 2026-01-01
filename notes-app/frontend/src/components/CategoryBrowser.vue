@@ -41,7 +41,7 @@
           <p class="note-preview">{{ getPreview(note.content, 150) }}</p>
           <div class="note-meta">
             <span class="note-date">{{ formatDate(note.created, { includeTime: true }) }}</span>
-            <span class="category-badge">{{ formatCategoryName(note.category) }}</span>
+            <CategoryBadge :category="note.category" />
           </div>
         </div>
       </div>
@@ -58,9 +58,13 @@
 <script>
 import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
 import { API_URL } from '../utils/api'
+import CategoryBadge from './shared/CategoryBadge.vue'
 
 export default {
   name: 'CategoryBrowser',
+  components: {
+    CategoryBadge
+  },
   data() {
     return {
       categories: [],
@@ -261,14 +265,6 @@ export default {
 
 .note-date {
   color: #999;
-}
-
-.category-badge {
-  background: #e9ecef;
-  color: #495057;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.75rem;
 }
 
 .no-notes {

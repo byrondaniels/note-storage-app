@@ -64,9 +64,7 @@
                 </div>
                 <p class="source-content">{{ getPreview(source.note.content, 120) }}</p>
                 <div class="source-meta">
-                  <span v-if="source.note.category" class="category-badge">
-                    {{ formatCategoryName(source.note.category) }}
-                  </span>
+                  <CategoryBadge :category="source.note.category" />
                   <span class="source-date">{{ formatDate(source.note.created) }}</span>
                 </div>
               </div>
@@ -97,9 +95,13 @@
 <script>
 import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
 import { API_URL } from '../utils/api'
+import CategoryBadge from './shared/CategoryBadge.vue'
 
 export default {
   name: 'QuestionAnswer',
+  components: {
+    CategoryBadge
+  },
   data() {
     return {
       currentQuestion: '',
@@ -363,13 +365,6 @@ export default {
   align-items: center;
   margin-top: 0.5rem;
   font-size: 0.8rem;
-}
-
-.category-badge {
-  background: #e9ecef;
-  color: #495057;
-  padding: 0.2rem 0.5rem;
-  border-radius: 4px;
 }
 
 .source-date {

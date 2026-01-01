@@ -58,7 +58,7 @@
           <div class="result-header">
             <div class="result-title-section">
               <h3>{{ result.note.title }}</h3>
-              <span v-if="result.note.category" class="category-badge">{{ formatCategoryName(result.note.category) }}</span>
+              <CategoryBadge :category="result.note.category" />
             </div>
             <div class="result-score">
               <span class="score-label">Relevance:</span>
@@ -91,7 +91,7 @@
       <template #header>
         <div class="modal-title-section">
           <h2>{{ expandedNote?.title }}</h2>
-          <span v-if="expandedNote?.category" class="category-badge">{{ formatCategoryName(expandedNote.category) }}</span>
+          <CategoryBadge :category="expandedNote?.category" />
         </div>
       </template>
 
@@ -110,11 +110,13 @@ import axios from 'axios'
 import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
 import { API_URL } from '../utils/api'
 import BaseModal from './shared/BaseModal.vue'
+import CategoryBadge from './shared/CategoryBadge.vue'
 
 export default {
   name: 'SearchNotes',
   components: {
-    BaseModal
+    BaseModal,
+    CategoryBadge
   },
   data() {
     return {
@@ -332,15 +334,6 @@ h1 {
   margin: 0 0 8px 0;
   color: #2c3e50;
   font-size: 18px;
-}
-
-.category-badge {
-  background: #e9ecef;
-  color: #495057;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
 }
 
 .result-score {

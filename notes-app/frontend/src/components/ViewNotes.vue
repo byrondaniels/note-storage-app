@@ -144,7 +144,7 @@
                     <div class="note-item-header">
                       <h3 class="note-title">{{ note.title }}</h3>
                       <div class="note-badges">
-                        <span v-if="note.category" class="category-badge">{{ formatCategoryName(note.category) }}</span>
+                        <CategoryBadge :category="note.category" />
                       </div>
                     </div>
                     <p class="note-preview">{{ getPreview(note.content) }}</p>
@@ -171,7 +171,7 @@
               <div class="note-item-header">
                 <h3 class="note-title">{{ note.title }}</h3>
                 <div class="note-badges">
-                  <span v-if="note.category" class="category-badge">{{ formatCategoryName(note.category) }}</span>
+                  <CategoryBadge :category="note.category" />
                   <span v-if="note.metadata && note.metadata.platform" class="source-badge">{{ getSourceLabel(note.metadata.platform) }}</span>
                 </div>
               </div>
@@ -211,7 +211,7 @@
                 </a>
               </div>
               <div class="note-detail-meta">
-                <span v-if="selectedNote.category" class="category-badge large">{{ formatCategoryName(selectedNote.category) }}</span>
+                <CategoryBadge :category="selectedNote.category" size="large" />
               </div>
               <div class="note-dates">
                 <div class="date-item">
@@ -443,11 +443,13 @@ import axios from 'axios'
 import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
 import { API_URL } from '../utils/api'
 import BaseModal from './shared/BaseModal.vue'
+import CategoryBadge from './shared/CategoryBadge.vue'
 
 export default {
   name: 'ViewNotes',
   components: {
-    BaseModal
+    BaseModal,
+    CategoryBadge
   },
   data() {
     return {
@@ -1749,8 +1751,8 @@ export default {
 }
 
 .note-item.active .category-badge {
-  background: rgba(255, 255, 255, 0.2);
-  color: white;
+  background: rgba(255, 255, 255, 0.2) !important;
+  color: white !important;
 }
 
 .note-item-header {
@@ -1790,21 +1792,6 @@ export default {
 .note-date {
   font-size: 12px;
   color: #8e8e93;
-}
-
-.category-badge {
-  background: #e9ecef;
-  color: #495057;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 500;
-  flex-shrink: 0;
-}
-
-.category-badge.large {
-  padding: 4px 8px;
-  font-size: 12px;
 }
 
 .note-badges {
