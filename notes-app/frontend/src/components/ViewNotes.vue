@@ -377,66 +377,63 @@
     </div>
     
     <!-- Delete Confirmation Modal -->
-    <div v-if="showDeleteModal" class="modal-overlay" @click="cancelDelete">
-      <div class="modal-content delete-modal" @click.stop>
-        <div class="modal-header">
-          <h3>Delete Note</h3>
-          <button @click="cancelDelete" class="close-btn">&times;</button>
-        </div>
-        <div class="modal-body">
-          <p>Are you sure you want to delete this note?</p>
-          <p class="note-title-preview">"{{ noteToDelete?.title }}"</p>
-          <p class="warning">This action cannot be undone.</p>
-        </div>
-        <div class="modal-footer">
-          <button @click="cancelDelete" class="btn btn-secondary">Cancel</button>
-          <button @click="deleteNote" class="btn btn-danger" :disabled="deleting">
-            {{ deleting ? 'Deleting...' : 'Delete' }}
-          </button>
-        </div>
-      </div>
-    </div>
-    
+    <BaseModal
+      :show="showDeleteModal"
+      title="Delete Note"
+      size="small"
+      @close="cancelDelete"
+    >
+      <p>Are you sure you want to delete this note?</p>
+      <p class="note-title-preview">"{{ noteToDelete?.title }}"</p>
+      <p class="warning">This action cannot be undone.</p>
+
+      <template #footer>
+        <button @click="cancelDelete" class="btn btn-secondary">Cancel</button>
+        <button @click="deleteNote" class="btn btn-danger" :disabled="deleting">
+          {{ deleting ? 'Deleting...' : 'Delete' }}
+        </button>
+      </template>
+    </BaseModal>
+
     <!-- AI Questions Modal -->
-    <div v-if="showAIModal" class="modal-overlay" @click="closeAIModal">
-      <div class="modal-content ai-modal" @click.stop>
-        <div class="modal-header">
-          <h3>AI Questions</h3>
-          <button @click="closeAIModal" class="close-btn">&times;</button>
+    <BaseModal
+      :show="showAIModal"
+      title="AI Questions"
+      size="large"
+      :close-on-overlay-click="!aiLoading"
+      @close="closeAIModal"
+    >
+      <p class="ai-modal-description">Below is the prompt that will be passed along with this content:</p>
+
+      <div class="form-group">
+        <textarea
+          v-model="aiPrompt"
+          class="form-textarea ai-prompt-textarea"
+          placeholder="Enter your question or request about this note..."
+          :disabled="aiLoading"
+          @keydown="handleAIModalKeydown"
+        ></textarea>
+      </div>
+
+      <!-- AI Response Section -->
+      <div v-if="aiResponse || aiLoading" class="ai-response-section">
+        <h4>AI Response:</h4>
+        <div v-if="aiLoading" class="ai-loading">
+          <div class="ai-spinner"></div>
+          <span>Getting AI response...</span>
         </div>
-        <div class="modal-body">
-          <p class="ai-modal-description">Below is the prompt that will be passed along with this content:</p>
-          
-          <div class="form-group">
-            <textarea 
-              v-model="aiPrompt" 
-              class="form-textarea ai-prompt-textarea"
-              placeholder="Enter your question or request about this note..."
-              :disabled="aiLoading"
-              @keydown="handleAIModalKeydown"
-            ></textarea>
-          </div>
-          
-          <!-- AI Response Section -->
-          <div v-if="aiResponse || aiLoading" class="ai-response-section">
-            <h4>AI Response:</h4>
-            <div v-if="aiLoading" class="ai-loading">
-              <div class="ai-spinner"></div>
-              <span>Getting AI response...</span>
-            </div>
-            <div v-else class="ai-response">
-              {{ aiResponse }}
-            </div>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button @click="closeAIModal" class="btn btn-secondary" :disabled="aiLoading">Close</button>
-          <button @click="sendToAI" class="btn btn-primary ai-send-btn" :disabled="aiLoading || !aiPrompt.trim()">
-            {{ aiLoading ? 'Sending...' : 'Send to AI' }}
-          </button>
+        <div v-else class="ai-response">
+          {{ aiResponse }}
         </div>
       </div>
-    </div>
+
+      <template #footer>
+        <button @click="closeAIModal" class="btn btn-secondary" :disabled="aiLoading">Close</button>
+        <button @click="sendToAI" class="btn btn-primary ai-send-btn" :disabled="aiLoading || !aiPrompt.trim()">
+          {{ aiLoading ? 'Sending...' : 'Send to AI' }}
+        </button>
+      </template>
+    </BaseModal>
     
   </div>
 </template>
@@ -445,9 +442,13 @@
 import axios from 'axios'
 import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
 import { API_URL } from '../utils/api'
+import BaseModal from './shared/BaseModal.vue'
 
 export default {
   name: 'ViewNotes',
+  components: {
+    BaseModal
+  },
   data() {
     return {
       notes: [],
@@ -2215,96 +2216,7 @@ export default {
   background: #aeaeb2;
 }
 
-/* Modal Styles */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  max-width: 90vw;
-  max-height: 90vh;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.delete-modal {
-  width: 450px;
-}
-
-.edit-modal {
-  width: 600px;
-  max-height: 80vh;
-}
-
-.ai-modal {
-  width: 700px;
-  max-height: 85vh;
-}
-
-.modal-header {
-  padding: 24px 24px 16px 24px;
-  border-bottom: 1px solid #f0f0f0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: white;
-}
-
-.modal-header h3 {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: #1c1c1e;
-}
-
-.close-btn {
-  background: none;
-  border: none;
-  font-size: 24px;
-  cursor: pointer;
-  color: #8e8e93;
-  padding: 0;
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  transition: background-color 0.2s;
-}
-
-.close-btn:hover {
-  background-color: #f0f0f0;
-  color: #1c1c1e;
-}
-
-.modal-body {
-  padding: 20px 24px;
-  flex: 1;
-  overflow-y: auto;
-}
-
-.modal-footer {
-  padding: 16px 24px 24px 24px;
-  border-top: 1px solid #f0f0f0;
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  background: white;
-}
+/* Modal Styles - Base styles moved to BaseModal.vue */
 
 /* Delete Modal Specific */
 .note-title-preview {
@@ -2432,17 +2344,6 @@ export default {
   .note-detail-content {
     padding: 20px;
     font-size: 15px;
-  }
-  
-  .modal-content {
-    margin: 20px;
-    max-width: calc(100vw - 40px);
-  }
-  
-  .edit-modal,
-  .delete-modal,
-  .ai-modal {
-    width: auto;
   }
 }
 

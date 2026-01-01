@@ -113,19 +113,22 @@
     </div>
 
     <!-- Delete Confirmation Modal -->
-    <div v-if="showDeleteModal" class="modal-overlay" @click.self="showDeleteModal = false">
-      <div class="modal-content">
-        <h2>Delete All Notes</h2>
-        <p>Are you sure you want to delete all <strong>{{ channelToDelete?.noteCount }}</strong> notes from <strong>{{ channelToDelete?.name }}</strong>?</p>
-        <p class="warning">This action cannot be undone.</p>
-        <div class="modal-actions">
-          <button @click="showDeleteModal = false" class="cancel-btn">Cancel</button>
-          <button @click="confirmDelete" :disabled="deleting" class="delete-btn">
-            {{ deleting ? 'Deleting...' : 'Delete All' }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <BaseModal
+      :show="showDeleteModal"
+      title="Delete All Notes"
+      size="small"
+      @close="showDeleteModal = false"
+    >
+      <p>Are you sure you want to delete all <strong>{{ channelToDelete?.noteCount }}</strong> notes from <strong>{{ channelToDelete?.name }}</strong>?</p>
+      <p class="warning">This action cannot be undone.</p>
+
+      <template #footer>
+        <button @click="showDeleteModal = false" class="cancel-btn">Cancel</button>
+        <button @click="confirmDelete" :disabled="deleting" class="delete-btn">
+          {{ deleting ? 'Deleting...' : 'Delete All' }}
+        </button>
+      </template>
+    </BaseModal>
 
     <!-- Prompt Templates Section -->
     <div class="templates-section">
@@ -382,6 +385,7 @@
 <script>
 import axios from 'axios'
 import { API_URL } from '../utils/api'
+import BaseModal from './shared/BaseModal.vue'
 
 const EXTENSION_ID = 'koodfochknchgnegkcmcfcidkfgdfgkc'
 
@@ -394,6 +398,9 @@ const DEFAULT_PROMPT_SCHEMA = `{
 
 export default {
   name: 'ChannelSettings',
+  components: {
+    BaseModal
+  },
   data() {
     return {
       channels: [],
@@ -1873,52 +1880,14 @@ textarea:focus {
   background: #c82333;
 }
 
-/* Modal */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
+/* Modal Styles - Base styles moved to BaseModal.vue */
 
-.modal-content {
-  background: white;
-  padding: 24px;
-  border-radius: 12px;
-  max-width: 400px;
-  width: 90%;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-}
-
-.modal-content h2 {
-  margin: 0 0 16px 0;
-  color: #333;
-}
-
-.modal-content p {
-  margin: 0 0 12px 0;
-  color: #666;
-}
-
-.modal-content .warning {
+.warning {
   color: #dc3545;
   font-weight: 500;
 }
 
-.modal-actions {
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-  margin-top: 20px;
-}
-
-.modal-actions .cancel-btn {
+.cancel-btn {
   background: #e0e0e0;
   color: #333;
   border: none;
@@ -1928,11 +1897,11 @@ textarea:focus {
   font-size: 14px;
 }
 
-.modal-actions .cancel-btn:hover {
+.cancel-btn:hover {
   background: #d0d0d0;
 }
 
-.modal-actions .delete-btn {
+.delete-btn {
   background: #dc3545;
   color: white;
   border: none;
@@ -1942,11 +1911,11 @@ textarea:focus {
   font-size: 14px;
 }
 
-.modal-actions .delete-btn:hover:not(:disabled) {
+.delete-btn:hover:not(:disabled) {
   background: #c82333;
 }
 
-.modal-actions .delete-btn:disabled {
+.delete-btn:disabled {
   background: #999;
   cursor: not-allowed;
 }
