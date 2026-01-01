@@ -48,6 +48,9 @@ class SocialMediaSaver {
       youtube: null
     };
 
+    // UI components (initialized after platform handlers)
+    this.actionBarFinder = null;
+
     this.init();
   }
 
@@ -104,6 +107,9 @@ class SocialMediaSaver {
     this.platformHandlers.linkedin.setProcessedPosts(this.processedPosts);
     this.platformHandlers.youtube = new YouTubeHandler(this.config);
     console.log('Social Media Note Saver: Platform handlers initialized');
+
+    // Initialize UI components
+    this.actionBarFinder = new ActionBarFinder(this.platformHandlers, this.platform);
   }
 
   startObserving() {
@@ -434,12 +440,12 @@ class SocialMediaSaver {
 
   addSaveButton(postElement) {
     const postId = this.getPostId(postElement);
-    
+
     if (this.processedPosts.has(postId)) {
       console.log('Social Media Note Saver: Post already processed, skipping:', postId);
       return;
     }
-    
+
     // For YouTube, check for existing buttons more broadly since the postElement might be the entire page
     if (this.platform === 'youtube') {
       const existingButtons = document.querySelectorAll(YOUTUBE_SELECTORS.saveButtons);
@@ -457,186 +463,70 @@ class SocialMediaSaver {
         return;
       }
     }
-    
+
     this.processedPosts.add(postId);
-    
-    // Find a good place to insert the button
-    const actionBar = this.findActionBar(postElement);
+
+    // Find a good place to insert the button using ActionBarFinder
+    const actionBar = this.actionBarFinder.findActionBar(postElement);
     if (!actionBar) {
       console.log('Social Media Note Saver: Could not find action bar for post');
       return;
     }
-    
+
     console.log('Social Media Note Saver: Adding save button to post:', postId);
-    
-    // Create save button
-    const saveButton = this.createSaveButton(postElement);
-    
+
+    // Create save button using SaveButton class
+    const saveButtonInstance = new SaveButton(this.platform, async () => {
+      await this.savePost(postElement, saveButtonInstance);
+    });
+    const saveButton = saveButtonInstance.createElement();
+
     // Insert button at the far right of the action bar
     console.log('Social Media Note Saver: Inserting button into action bar:', actionBar);
     console.log('Social Media Note Saver: Action bar current children:', actionBar.children.length);
-    
+
     actionBar.appendChild(saveButton);
-    
+
     console.log('Social Media Note Saver: Button added, new children count:', actionBar.children.length);
     console.log('Social Media Note Saver: Save button element:', saveButton);
     console.log('Social Media Note Saver: Save button visible?', saveButton.offsetWidth > 0 && saveButton.offsetHeight > 0);
-    
-    // Ensure the action bar uses flexbox layout 
+
+    // Ensure the action bar uses flexbox layout
     actionBar.style.display = 'flex';
     actionBar.style.alignItems = 'center';
     actionBar.style.gap = '8px';
-    
+
     // Make sure save button is positioned at the end and isolated
     saveButton.style.marginLeft = 'auto';
     saveButton.style.position = 'relative';
     saveButton.style.zIndex = '1000';
-    
+
     // For YouTube, make it more visible
     if (this.platform === 'youtube') {
       saveButton.style.border = '2px solid #1976d2 !important';
       saveButton.style.transform = 'scale(1.1) !important';
       console.log('Social Media Note Saver: Applied YouTube-specific visibility styles');
     }
-    
+
     // Prevent event bubbling that might interfere with other buttons
     saveButton.addEventListener('mouseenter', (e) => {
       e.stopPropagation();
     });
-    
+
     saveButton.addEventListener('mouseleave', (e) => {
       e.stopPropagation();
     });
   }
 
-  findActionBar(postElement) {
-    const handler = this.platformHandlers[this.platform];
-    if (handler) {
-      return handler.findActionBar(postElement);
-    }
-
-    // Fallback for platforms without handlers yet
-    if (this.platform === 'linkedin') {
-      return this.findLinkedInActionBar(postElement);
-    }
-    if (this.platform === 'youtube') {
-      return this.findYouTubeActionBar(postElement);
-    }
-
-    // Generic fallback
-    const container = document.createElement('div');
-    container.className = 'social-saver-actions';
-    postElement.appendChild(container);
-    return container;
-  }
-
-
-
-
-  createSaveButton(postElement) {
-    const button = document.createElement('button');
-    button.className = 'social-save-btn';
-    button.setAttribute('data-platform', this.platform);
-    
-    // Blue button without icon - platform-specific text
-    if (this.platform === 'youtube') {
-      button.innerHTML = `<span>Save Transcript</span>`;
-    } else {
-      button.innerHTML = `<span>Save</span>`;
-    }
-    
-    // Add blue styling with isolation - YouTube gets special styling
-    if (this.platform === 'youtube') {
-      button.style.cssText = `
-        background-color: #1976d2 !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 18px !important;
-        padding: 10px 16px !important;
-        font-size: 14px !important;
-        font-weight: 500 !important;
-        cursor: pointer !important;
-        margin-left: 8px !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        height: 36px !important;
-        min-width: 120px !important;
-        transition: background-color 0.2s ease !important;
-        position: relative !important;
-        z-index: 1000 !important;
-        isolation: isolate !important;
-        pointer-events: auto !important;
-        font-family: 'YouTube Sans', 'Roboto', sans-serif !important;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.1) !important;
-      `;
-    } else {
-      button.style.cssText = `
-        background-color: #0a66c2 !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 16px !important;
-        padding: 8px 16px !important;
-        font-size: 14px !important;
-        font-weight: 600 !important;
-        cursor: pointer !important;
-        margin-left: 8px !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        height: 32px !important;
-        min-width: 64px !important;
-        transition: background-color 0.2s ease !important;
-        position: relative !important;
-        z-index: 1000 !important;
-        isolation: isolate !important;
-        pointer-events: auto !important;
-      `;
-    }
-    
-    // Hover effect - platform specific
-    if (this.platform === 'youtube') {
-      button.addEventListener('mouseenter', () => {
-        button.style.backgroundColor = '#1565c0 !important';
-      });
-      
-      button.addEventListener('mouseleave', () => {
-        button.style.backgroundColor = '#1976d2 !important';
-      });
-    } else {
-      button.addEventListener('mouseenter', () => {
-        button.style.backgroundColor = '#084d95 !important';
-      });
-      
-      button.addEventListener('mouseleave', () => {
-        button.style.backgroundColor = '#0a66c2 !important';
-      });
-    }
-    
-    button.title = 'Save post to notes';
-    
-    button.addEventListener('click', async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      await this.savePost(postElement, button);
-    });
-    
-    return button;
-  }
-
-  async savePost(postElement, button) {
-    const originalContent = button.innerHTML;
-    
+  async savePost(postElement, saveButtonInstance) {
     try {
-      // Show loading state
-      button.innerHTML = `<span>Saving...</span>`;
-      button.style.backgroundColor = '#666666 !important';
-      button.disabled = true;
-      
+      // Show loading state using SaveButton method
+      saveButtonInstance.setLoading();
+
       // Extract post data
       const shareInfo = this.getShareInfo(postElement);
       const metrics = this.getPostMetrics(postElement);
-      
+
       const postData = {
         content: await this.getPostContent(postElement),
         author: this.getPostAuthor(postElement),
@@ -649,12 +539,12 @@ class SocialMediaSaver {
         shareContext: shareInfo.shareContext || shareInfo.retweetContext || '',
         metrics: metrics
       };
-      
+
       console.log('Social Media Note Saver: Extracted data', postData);
-      
+
       // Build payload from template
       const payload = this.buildPayload(postData);
-      
+
       // Send to API
       const response = await fetch(this.config.apiEndpoint, {
         method: 'POST',
@@ -663,44 +553,19 @@ class SocialMediaSaver {
         },
         body: JSON.stringify(payload)
       });
-      
+
       if (!response.ok) {
         throw new Error(`API request failed: ${response.status} ${response.statusText}`);
       }
-      
-      // Show success
-      button.innerHTML = `<span>Saved!</span>`;
-      button.style.setProperty('background-color', '#057642', 'important');
-      button.style.setProperty('border-color', '#057642', 'important');
-      button.classList.add('success');
-      
-      // Reset after 2 seconds
-      setTimeout(() => {
-        button.innerHTML = originalContent;
-        button.disabled = false;
-        const originalColor = this.platform === 'youtube' ? '#1976d2' : '#0a66c2';
-        button.style.setProperty('background-color', originalColor, 'important');
-        button.style.setProperty('border-color', originalColor, 'important');
-        button.classList.remove('success');
-      }, 2000);
-      
+
+      // Show success using SaveButton method (auto-resets after 2 seconds)
+      saveButtonInstance.setSuccess();
+
     } catch (error) {
       console.error('Social Media Note Saver: Save failed', error);
-      
-      // Show error
-      button.innerHTML = `<span>Error</span>`;
-      button.style.backgroundColor = '#cc1016 !important';
-      button.classList.add('error');
-      button.title = `Save failed: ${error.message}`;
-      
-      // Reset after 3 seconds
-      setTimeout(() => {
-        button.innerHTML = originalContent;
-        button.disabled = false;
-        button.style.backgroundColor = this.platform === 'youtube' ? '#1976d2 !important' : '#0a66c2 !important';
-        button.classList.remove('error');
-        button.title = 'Save post to notes';
-      }, 3000);
+
+      // Show error using SaveButton method (auto-resets after 3 seconds)
+      saveButtonInstance.setError(error.message);
     }
   }
 
