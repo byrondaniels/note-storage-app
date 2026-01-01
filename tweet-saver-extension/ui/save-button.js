@@ -183,11 +183,3 @@ class SaveButton {
     return this.button;
   }
 }
-
-// Export for ES6 modules
-export { SaveButton };
-
-// Also make available globally for content scripts (when loaded as regular script)
-if (typeof window !== 'undefined') {
-  window.SaveButton = SaveButton;
-}

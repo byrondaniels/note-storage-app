@@ -343,10 +343,7 @@ class BasePlatformHandler {
   }
 }
 
-// Export for ES6 modules
-export { BasePlatformHandler };
-
-// Also make available globally for content scripts (when loaded as regular script)
-if (typeof window !== 'undefined') {
-  window.BasePlatformHandler = BasePlatformHandler;
+// Export for use in other modules
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = BasePlatformHandler;
 }
