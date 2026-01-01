@@ -1,20 +1,10 @@
 // Social Media Note Saver - Options Page Script
 
+import { DEFAULT_CONFIG, StorageService } from './utils/config.js';
+import { replaceTemplatePlaceholders } from './utils/template-processor.js';
+
 const templates = {
-  simple: {
-    content: '{{content}}',
-    metadata: {
-      author: '{{author}}',
-      handle: '{{handle}}',
-      url: '{{url}}',
-      timestamp: '{{timestamp}}',
-      platform: '{{platform}}',
-      isShare: '{{isShare}}',
-      sharedBy: '{{sharedBy}}',
-      shareContext: '{{shareContext}}',
-      metrics: '{{metrics}}'
-    }
-  },
+  simple: DEFAULT_CONFIG.payloadTemplate,
   notes: {
     content: '{{content}}'
   },
@@ -76,10 +66,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function loadConfig() {
     try {
-      const result = await chrome.storage.sync.get({
-        apiEndpoint: 'http://localhost:8080/notes',
-        payloadTemplate: templates.simple
-      });
+      const result = await StorageService.loadConfig();
 
       apiEndpointInput.value = result.apiEndpoint;
       payloadTemplateTextarea.value = JSON.stringify(result.payloadTemplate, null, 2);
@@ -197,8 +184,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function resetDefaults() {
     if (confirm('Are you sure you want to reset to default configuration? This will overwrite your current settings.')) {
-      apiEndpointInput.value = 'http://localhost:8080/notes';
-      payloadTemplateTextarea.value = JSON.stringify(templates.simple, null, 2);
+      apiEndpointInput.value = DEFAULT_CONFIG.apiEndpoint;
+      payloadTemplateTextarea.value = JSON.stringify(DEFAULT_CONFIG.payloadTemplate, null, 2);
       showStatus('Reset to default configuration. Click "Save Configuration" to apply changes.', 'info');
     }
   }
@@ -206,7 +193,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function clearData() {
     if (confirm('Are you sure you want to clear all extension data? This action cannot be undone.')) {
       try {
-        await chrome.storage.sync.clear();
+        await StorageService.clear();
         showStatus('All extension data cleared successfully.', 'success');
         setTimeout(() => {
           location.reload();
@@ -222,45 +209,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       payloadTemplateTextarea.value = JSON.stringify(templates[templateName], null, 2);
       showStatus(`Template "${templateName}" loaded. Click "Save Configuration" to apply changes.`, 'info');
     }
-  }
-
-  function replaceTemplatePlaceholders(template, data) {
-    const replacePlaceholders = (obj) => {
-      if (typeof obj === 'string') {
-        // Handle conditional share context
-        let sharePrefix = '';
-        if (data.isShare && data.shareContext) {
-          sharePrefix = `${data.shareContext}\n\n`;
-        }
-        
-        return obj
-          .replace(/\{\{content\}\}/g, data.content || '')
-          .replace(/\{\{author\}\}/g, data.author || '')
-          .replace(/\{\{handle\}\}/g, data.handle || '')
-          .replace(/\{\{url\}\}/g, data.url || '')
-          .replace(/\{\{timestamp\}\}/g, data.timestamp || '')
-          .replace(/\{\{platform\}\}/g, data.platform || 'unknown')
-          .replace(/\{\{isShare\}\}/g, data.isShare ? 'true' : 'false')
-          .replace(/\{\{sharedBy\}\}/g, data.sharedBy || '')
-          .replace(/\{\{shareContext\}\}/g, sharePrefix)
-          .replace(/\{\{metrics\}\}/g, JSON.stringify(data.metrics || {}))
-          // Backward compatibility for existing templates
-          .replace(/\{\{isRetweet\}\}/g, data.isShare ? 'true' : 'false')
-          .replace(/\{\{retweetedBy\}\}/g, data.sharedBy || '')
-          .replace(/\{\{retweetContext\}\}/g, sharePrefix);
-      } else if (Array.isArray(obj)) {
-        return obj.map(replacePlaceholders);
-      } else if (typeof obj === 'object' && obj !== null) {
-        const result = {};
-        for (const key in obj) {
-          result[key] = replacePlaceholders(obj[key]);
-        }
-        return result;
-      }
-      return obj;
-    };
-
-    return replacePlaceholders(JSON.parse(JSON.stringify(template)));
   }
 
   function showStatus(message, type) {

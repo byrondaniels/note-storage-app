@@ -1,6 +1,8 @@
 // Social Media Note Saver - Content Script
 // Runs on supported social media platforms to inject save buttons
 
+// DEFAULT_CONFIG and StorageService are loaded from utils/config.js via manifest
+
 // Storage helpers for tracking imported videos
 async function isVideoImported(videoId) {
   try {
@@ -71,47 +73,13 @@ class SocialMediaSaver {
 
   async loadConfig() {
     try {
-      const result = await chrome.storage.sync.get({
-        extensionEnabled: true,
-        apiEndpoint: 'http://localhost:8080/notes',
-        payloadTemplate: {
-          content: '{{content}}',
-          metadata: {
-            author: '{{author}}',
-            handle: '{{handle}}',
-            url: '{{url}}',
-            timestamp: '{{timestamp}}',
-            platform: '{{platform}}',
-            isShare: '{{isShare}}',
-            sharedBy: '{{sharedBy}}',
-            shareContext: '{{shareContext}}',
-            metrics: '{{metrics}}'
-          }
-        }
-      });
+      const result = await StorageService.loadConfig();
       this.config = result;
       this.isEnabled = result.extensionEnabled;
       console.log('Social Media Note Saver: Config loaded', this.config);
     } catch (error) {
       console.error('Social Media Note Saver: Failed to load config', error);
-      this.config = {
-        extensionEnabled: true,
-        apiEndpoint: 'http://localhost:8080/notes',
-        payloadTemplate: {
-          content: '{{content}}',
-          metadata: {
-            author: '{{author}}',
-            handle: '{{handle}}',
-            url: '{{url}}',
-            timestamp: '{{timestamp}}',
-            platform: '{{platform}}',
-            isShare: '{{isShare}}',
-            sharedBy: '{{sharedBy}}',
-            shareContext: '{{shareContext}}',
-            metrics: '{{metrics}}'
-          }
-        }
-      };
+      this.config = { ...DEFAULT_CONFIG };
       this.isEnabled = true;
     }
   }

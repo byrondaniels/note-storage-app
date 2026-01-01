@@ -1,5 +1,7 @@
 // Social Media Note Saver - Background Script (Service Worker)
 
+import { DEFAULT_CONFIG, StorageService } from './utils/config.js';
+
 // Handle extension installation
 chrome.runtime.onInstalled.addListener((details) => {
   console.log('Social Media Note Saver: Extension installed/updated', details);
@@ -10,43 +12,14 @@ chrome.runtime.onInstalled.addListener((details) => {
     if (currentContent.includes('This post is from') || !result.payloadTemplate) {
       console.log('Social Media Note Saver: Migrating to clean payload template');
       chrome.storage.sync.set({
-        payloadTemplate: {
-          content: '{{content}}',
-          metadata: {
-            author: '{{author}}',
-            handle: '{{handle}}',
-            url: '{{url}}',
-            timestamp: '{{timestamp}}',
-            platform: '{{platform}}',
-            isShare: '{{isShare}}',
-            sharedBy: '{{sharedBy}}',
-            shareContext: '{{shareContext}}',
-            metrics: '{{metrics}}'
-          }
-        }
+        payloadTemplate: DEFAULT_CONFIG.payloadTemplate
       });
     }
   });
 
   // Set default configuration on first install
   if (details.reason === 'install') {
-    chrome.storage.sync.set({
-      apiEndpoint: 'http://localhost:8080/notes',
-      payloadTemplate: {
-        content: '{{content}}',
-        metadata: {
-          author: '{{author}}',
-          handle: '{{handle}}',
-          url: '{{url}}',
-          timestamp: '{{timestamp}}',
-          platform: '{{platform}}',
-          isShare: '{{isShare}}',
-          sharedBy: '{{sharedBy}}',
-          shareContext: '{{shareContext}}',
-          metrics: '{{metrics}}'
-        }
-      }
-    });
+    chrome.storage.sync.set(DEFAULT_CONFIG);
   }
 });
 
