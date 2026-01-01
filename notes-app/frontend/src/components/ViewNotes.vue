@@ -212,10 +212,23 @@
               </div>
               <div class="note-detail-meta">
                 <span v-if="selectedNote.category" class="category-badge large">{{ formatCategoryName(selectedNote.category) }}</span>
-                <span class="note-detail-date">{{ formatDate(selectedNote.created) }}</span>
+              </div>
+              <div class="note-dates">
+                <div class="date-item">
+                  <span class="date-label">Date Imported:</span>
+                  <span class="date-value">{{ formatDate(selectedNote.created) }}</span>
+                </div>
+                <div v-if="selectedNote.sourcePublishedAt" class="date-item">
+                  <span class="date-label">Source Published:</span>
+                  <span class="date-value">{{ formatDate(selectedNote.sourcePublishedAt) }}</span>
+                </div>
+                <div v-if="selectedNote.lastSummarizedAt" class="date-item">
+                  <span class="date-label">Last Summarized:</span>
+                  <span class="date-value">{{ formatDate(selectedNote.lastSummarizedAt) }}</span>
+                </div>
               </div>
             </div>
-            
+
             <div class="note-actions">
               <button @click="openAIModal" class="action-btn ai-btn" title="Ask AI about this note">
                 <span class="action-icon">🤖</span>
@@ -1106,15 +1119,18 @@ export default {
           content: this.selectedNote.content
         })
 
-        // Update the selected note with the new summary and structured data
+        // Update the selected note with the new summary, structured data, and timestamp
+        const now = new Date().toISOString()
         this.selectedNote.summary = response.data.summary
         this.selectedNote.structuredData = response.data.structuredData
+        this.selectedNote.lastSummarizedAt = now
 
         // Update the note in the notes array
         const noteIndex = this.notes.findIndex(n => n.id === this.selectedNote.id)
         if (noteIndex !== -1) {
           this.notes[noteIndex].summary = response.data.summary
           this.notes[noteIndex].structuredData = response.data.structuredData
+          this.notes[noteIndex].lastSummarizedAt = now
         }
 
         // Update in filtered notes if applicable
@@ -1123,6 +1139,7 @@ export default {
           if (filteredIndex !== -1) {
             this.filteredNotes[filteredIndex].summary = response.data.summary
             this.filteredNotes[filteredIndex].structuredData = response.data.structuredData
+            this.filteredNotes[filteredIndex].lastSummarizedAt = now
           }
         }
 
@@ -1945,6 +1962,31 @@ export default {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.note-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 8px;
+  padding: 8px 0;
+  border-top: 1px solid #e5e5ea;
+}
+
+.date-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.date-label {
+  color: #8e8e93;
+  font-weight: 500;
+}
+
+.date-value {
+  color: #1c1c1e;
 }
 
 /* Action Buttons */

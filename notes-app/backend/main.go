@@ -27,14 +27,16 @@ import (
 )
 
 type Note struct {
-	ID             primitive.ObjectID     `json:"id" bson:"_id,omitempty"`
-	Title          string                 `json:"title" bson:"title"`
-	Content        string                 `json:"content" bson:"content"`
-	Summary        string                 `json:"summary" bson:"summary"`
-	StructuredData map[string]interface{} `json:"structuredData" bson:"structured_data"`
-	Category       string                 `json:"category" bson:"category"`
-	Created        time.Time              `json:"created" bson:"created"`
-	Metadata       map[string]interface{} `json:"metadata" bson:"metadata"`
+	ID                primitive.ObjectID     `json:"id" bson:"_id,omitempty"`
+	Title             string                 `json:"title" bson:"title"`
+	Content           string                 `json:"content" bson:"content"`
+	Summary           string                 `json:"summary" bson:"summary"`
+	StructuredData    map[string]interface{} `json:"structuredData" bson:"structured_data"`
+	Category          string                 `json:"category" bson:"category"`
+	Created           time.Time              `json:"created" bson:"created"`
+	SourcePublishedAt *time.Time             `json:"sourcePublishedAt,omitempty" bson:"source_published_at,omitempty"`
+	LastSummarizedAt  *time.Time             `json:"lastSummarizedAt,omitempty" bson:"last_summarized_at,omitempty"`
+	Metadata          map[string]interface{} `json:"metadata" bson:"metadata"`
 }
 
 type NoteChunk struct {
@@ -715,14 +717,33 @@ func createNote(c *gin.Context) {
 		}
 	}
 
+	// Parse SourcePublishedAt from metadata.timestamp if available
+	var sourcePublishedAt *time.Time
+	if ts, ok := metadata["timestamp"].(string); ok && ts != "" {
+		if parsed, err := time.Parse(time.RFC3339, ts); err == nil {
+			sourcePublishedAt = &parsed
+		} else {
+			log.Printf("Failed to parse timestamp '%s': %v", ts, err)
+		}
+	}
+
+	// Set LastSummarizedAt if we generated a summary
+	var lastSummarizedAt *time.Time
+	if summary != "" {
+		now := time.Now()
+		lastSummarizedAt = &now
+	}
+
 	note := Note{
-		Title:          title,
-		Content:        req.Content,
-		Category:       category,
-		Summary:        summary,
-		StructuredData: structuredData,
-		Created:        time.Now(),
-		Metadata:       metadata,
+		Title:             title,
+		Content:           req.Content,
+		Category:          category,
+		Summary:           summary,
+		StructuredData:    structuredData,
+		Created:           time.Now(),
+		SourcePublishedAt: sourcePublishedAt,
+		LastSummarizedAt:  lastSummarizedAt,
+		Metadata:          metadata,
 	}
 
 	result, err := notesCollection.InsertOne(context.TODO(), note)
@@ -1401,8 +1422,11 @@ func summarizeNote(c *gin.Context) {
 		return
 	}
 
-	// Update the note in the database with summary and structured data
-	updateFields := bson.M{"summary": summary}
+	// Update the note in the database with summary, structured data, and last summarized timestamp
+	updateFields := bson.M{
+		"summary":            summary,
+		"last_summarized_at": time.Now(),
+	}
 	if structuredData != nil {
 		updateFields["structured_data"] = structuredData
 	}
@@ -1480,8 +1504,11 @@ func summarizeNoteById(c *gin.Context) {
 		return
 	}
 
-	// Update the note in the database with summary and structured data
-	updateFields := bson.M{"summary": summary}
+	// Update the note in the database with summary, structured data, and last summarized timestamp
+	updateFields := bson.M{
+		"summary":            summary,
+		"last_summarized_at": time.Now(),
+	}
 	if structuredData != nil {
 		updateFields["structured_data"] = structuredData
 	}
