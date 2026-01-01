@@ -1,5 +1,8 @@
 // Social Media Note Saver - Popup Script
 
+import { DEFAULT_CONFIG, StorageService } from './utils/config.js';
+import { replaceTemplatePlaceholders } from './utils/template-processor.js';
+
 document.addEventListener('DOMContentLoaded', async () => {
   const extensionEnabledToggle = document.getElementById('extensionEnabled');
   const apiEndpointInput = document.getElementById('apiEndpoint');
@@ -30,24 +33,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function loadConfig() {
     try {
-      const result = await chrome.storage.sync.get({
-        extensionEnabled: true,
-        apiEndpoint: 'http://localhost:8080/notes',
-        payloadTemplate: {
-          content: '{{content}}',
-          metadata: {
-            author: '{{author}}',
-            handle: '{{handle}}',
-            url: '{{url}}',
-            timestamp: '{{timestamp}}',
-            platform: '{{platform}}',
-            isShare: '{{isShare}}',
-            sharedBy: '{{sharedBy}}',
-            shareContext: '{{shareContext}}',
-            metrics: '{{metrics}}'
-          }
-        }
-      });
+      const result = await StorageService.loadConfig();
 
       extensionEnabledToggle.checked = result.extensionEnabled;
       apiEndpointInput.value = result.apiEndpoint;
@@ -200,45 +186,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       testAPIButton.disabled = false;
       testAPIButton.textContent = 'Test API';
     }
-  }
-
-  function replaceTemplatePlaceholders(template, data) {
-    const replacePlaceholders = (obj) => {
-      if (typeof obj === 'string') {
-        // Handle conditional share context
-        let sharePrefix = '';
-        if (data.isShare && data.shareContext) {
-          sharePrefix = `${data.shareContext}\n\n`;
-        }
-        
-        return obj
-          .replace(/\{\{content\}\}/g, data.content || '')
-          .replace(/\{\{author\}\}/g, data.author || '')
-          .replace(/\{\{handle\}\}/g, data.handle || '')
-          .replace(/\{\{url\}\}/g, data.url || '')
-          .replace(/\{\{timestamp\}\}/g, data.timestamp || '')
-          .replace(/\{\{platform\}\}/g, data.platform || 'unknown')
-          .replace(/\{\{isShare\}\}/g, data.isShare ? 'true' : 'false')
-          .replace(/\{\{sharedBy\}\}/g, data.sharedBy || '')
-          .replace(/\{\{shareContext\}\}/g, sharePrefix)
-          .replace(/\{\{metrics\}\}/g, JSON.stringify(data.metrics || {}))
-          // Backward compatibility for existing templates
-          .replace(/\{\{isRetweet\}\}/g, data.isShare ? 'true' : 'false')
-          .replace(/\{\{retweetedBy\}\}/g, data.sharedBy || '')
-          .replace(/\{\{retweetContext\}\}/g, sharePrefix);
-      } else if (Array.isArray(obj)) {
-        return obj.map(replacePlaceholders);
-      } else if (typeof obj === 'object' && obj !== null) {
-        const result = {};
-        for (const key in obj) {
-          result[key] = replacePlaceholders(obj[key]);
-        }
-        return result;
-      }
-      return obj;
-    };
-
-    return replacePlaceholders(JSON.parse(JSON.stringify(template)));
   }
 
   function showStatus(message, type) {

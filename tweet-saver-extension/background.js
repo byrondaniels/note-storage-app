@@ -1,5 +1,8 @@
 // Social Media Note Saver - Background Script (Service Worker)
 
+import { DEFAULT_CONFIG, StorageService } from './utils/config.js';
+import { NotesApiClient } from './services/api-client.js';
+
 // Handle extension installation
 chrome.runtime.onInstalled.addListener((details) => {
   console.log('Social Media Note Saver: Extension installed/updated', details);
@@ -10,43 +13,14 @@ chrome.runtime.onInstalled.addListener((details) => {
     if (currentContent.includes('This post is from') || !result.payloadTemplate) {
       console.log('Social Media Note Saver: Migrating to clean payload template');
       chrome.storage.sync.set({
-        payloadTemplate: {
-          content: '{{content}}',
-          metadata: {
-            author: '{{author}}',
-            handle: '{{handle}}',
-            url: '{{url}}',
-            timestamp: '{{timestamp}}',
-            platform: '{{platform}}',
-            isShare: '{{isShare}}',
-            sharedBy: '{{sharedBy}}',
-            shareContext: '{{shareContext}}',
-            metrics: '{{metrics}}'
-          }
-        }
+        payloadTemplate: DEFAULT_CONFIG.payloadTemplate
       });
     }
   });
 
   // Set default configuration on first install
   if (details.reason === 'install') {
-    chrome.storage.sync.set({
-      apiEndpoint: 'http://localhost:8080/notes',
-      payloadTemplate: {
-        content: '{{content}}',
-        metadata: {
-          author: '{{author}}',
-          handle: '{{handle}}',
-          url: '{{url}}',
-          timestamp: '{{timestamp}}',
-          platform: '{{platform}}',
-          isShare: '{{isShare}}',
-          sharedBy: '{{sharedBy}}',
-          shareContext: '{{shareContext}}',
-          metrics: '{{metrics}}'
-        }
-      }
-    });
+    chrome.storage.sync.set(DEFAULT_CONFIG);
   }
 });
 
@@ -96,8 +70,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'testAPI') {
-    // Test API endpoint
-    testAPIEndpoint(request.endpoint, request.payload)
+    // Test API endpoint using ApiClient
+    const apiClient = new NotesApiClient(request.endpoint);
+    apiClient.testConnection(request.payload)
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
@@ -116,34 +91,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // Required for async response
   }
 });
-
-async function testAPIEndpoint(endpoint, payload) {
-  try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) {
-      throw new Error(`${response.status}: ${response.statusText}`);
-    }
-
-    const data = await response.text();
-    return {
-      success: true,
-      status: response.status,
-      response: data.substring(0, 200) // Limit response size
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error: error.message
-    };
-  }
-}
 
 // Channel import orchestration functions
 function normalizeChannelUrl(url) {
