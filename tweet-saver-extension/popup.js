@@ -1,9 +1,9 @@
 // Social Media Note Saver - Popup Script
 
-import { DEFAULT_CONFIG, StorageService } from './utils/config.js';
-import { replaceTemplatePlaceholders } from './utils/template-processor.js';
+import { ConfigManager } from './ui/config-manager.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // DOM elements
   const extensionEnabledToggle = document.getElementById('extensionEnabled');
   const apiEndpointInput = document.getElementById('apiEndpoint');
   const payloadTemplateTextarea = document.getElementById('payloadTemplate');
@@ -15,13 +15,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   const importChannelButton = document.getElementById('importChannel');
   const importStatusDiv = document.getElementById('importStatus');
 
+  // Initialize ConfigManager for shared config operations
+  const configManager = new ConfigManager({
+    apiEndpointInput,
+    payloadTemplateTextarea,
+    statusDiv,
+    testAPIButton
+  });
+
   // Load current configuration
-  await loadConfig();
+  await configManager.loadConfig(extensionEnabledToggle);
 
   // Event listeners
   extensionEnabledToggle.addEventListener('change', toggleExtension);
-  saveConfigButton.addEventListener('click', saveConfig);
-  testAPIButton.addEventListener('click', testAPI);
+  saveConfigButton.addEventListener('click', () => configManager.saveConfig());
+  testAPIButton.addEventListener('click', () => configManager.testAPI());
   importChannelButton.addEventListener('click', startChannelImport);
 
   // Listen for progress updates from background script
@@ -31,175 +39,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  async function loadConfig() {
-    try {
-      const result = await StorageService.loadConfig();
-
-      extensionEnabledToggle.checked = result.extensionEnabled;
-      apiEndpointInput.value = result.apiEndpoint;
-      payloadTemplateTextarea.value = JSON.stringify(result.payloadTemplate, null, 2);
-    } catch (error) {
-      showStatus('Error loading configuration: ' + error.message, 'error');
-    }
-  }
-
+  /**
+   * Toggle extension enabled state
+   */
   async function toggleExtension() {
     try {
       const isEnabled = extensionEnabledToggle.checked;
-      
-      await chrome.storage.sync.set({
-        extensionEnabled: isEnabled
-      });
 
-      showStatus(
-        isEnabled ? 'Extension enabled!' : 'Extension disabled!', 
+      await chrome.storage.sync.set({ extensionEnabled: isEnabled });
+
+      configManager.showStatus(
+        isEnabled ? 'Extension enabled!' : 'Extension disabled!',
         'success'
       );
-      
+
       // Notify content scripts about the change
-      try {
-        const tabs = await chrome.tabs.query({ 
-          url: ['https://twitter.com/*', 'https://x.com/*', 'https://linkedin.com/*', 'https://www.linkedin.com/*', 'https://youtube.com/*', 'https://www.youtube.com/*'] 
-        });
-        
-        for (const tab of tabs) {
-          chrome.tabs.sendMessage(tab.id, { 
-            action: 'extensionToggled', 
-            enabled: isEnabled 
-          }).catch(() => {
-            // Ignore errors for tabs without content script
-          });
-        }
-      } catch (error) {
-        console.log('Could not notify content scripts:', error);
-      }
+      await configManager.notifyContentScripts('extensionToggled', { enabled: isEnabled });
 
     } catch (error) {
-      showStatus('Error toggling extension: ' + error.message, 'error');
+      configManager.showStatus('Error toggling extension: ' + error.message, 'error');
       // Revert toggle state on error
       extensionEnabledToggle.checked = !extensionEnabledToggle.checked;
     }
   }
 
-  async function saveConfig() {
-    try {
-      const apiEndpoint = apiEndpointInput.value.trim();
-      if (!apiEndpoint) {
-        showStatus('Please enter an API endpoint URL', 'error');
-        return;
-      }
-
-      // Validate URL
-      try {
-        new URL(apiEndpoint);
-      } catch {
-        showStatus('Please enter a valid URL', 'error');
-        return;
-      }
-
-      // Validate JSON template
-      let payloadTemplate;
-      try {
-        payloadTemplate = JSON.parse(payloadTemplateTextarea.value);
-      } catch {
-        showStatus('Invalid JSON in payload template', 'error');
-        return;
-      }
-
-      // Save configuration
-      await chrome.storage.sync.set({
-        apiEndpoint,
-        payloadTemplate
-      });
-
-      showStatus('Configuration saved successfully!', 'success');
-      
-      // Notify content scripts to reload config
-      try {
-        const tabs = await chrome.tabs.query({ 
-          url: ['https://twitter.com/*', 'https://x.com/*', 'https://linkedin.com/*', 'https://www.linkedin.com/*', 'https://youtube.com/*', 'https://www.youtube.com/*'] 
-        });
-        
-        for (const tab of tabs) {
-          chrome.tabs.sendMessage(tab.id, { action: 'configUpdated' }).catch(() => {
-            // Ignore errors for tabs without content script
-          });
-        }
-      } catch (error) {
-        console.log('Could not notify content scripts:', error);
-      }
-
-    } catch (error) {
-      showStatus('Error saving configuration: ' + error.message, 'error');
-    }
-  }
-
-  async function testAPI() {
-    try {
-      const apiEndpoint = apiEndpointInput.value.trim();
-      if (!apiEndpoint) {
-        showStatus('Please enter an API endpoint URL first', 'error');
-        return;
-      }
-
-      let payloadTemplate;
-      try {
-        payloadTemplate = JSON.parse(payloadTemplateTextarea.value);
-      } catch {
-        showStatus('Invalid JSON in payload template', 'error');
-        return;
-      }
-
-      testAPIButton.disabled = true;
-      testAPIButton.textContent = 'Testing...';
-      showStatus('Testing API connection...', 'info');
-
-      // Create test payload
-      const testPayload = replaceTemplatePlaceholders(payloadTemplate, {
-        content: 'This is a test post content from the extension',
-        author: 'TestUser',
-        handle: '@TestUser',
-        url: 'https://twitter.com/TestUser/status/123456789',
-        timestamp: new Date().toISOString(),
-        platform: 'twitter',
-        isShare: false,
-        sharedBy: '',
-        shareContext: '',
-        metrics: {}
-      });
-
-      const response = await chrome.runtime.sendMessage({
-        action: 'testAPI',
-        endpoint: apiEndpoint,
-        payload: testPayload
-      });
-
-      if (response.success) {
-        showStatus(`✅ API test successful! Status: ${response.status}`, 'success');
-      } else {
-        showStatus(`❌ API test failed: ${response.error}`, 'error');
-      }
-
-    } catch (error) {
-      showStatus('Test failed: ' + error.message, 'error');
-    } finally {
-      testAPIButton.disabled = false;
-      testAPIButton.textContent = 'Test API';
-    }
-  }
-
-  function showStatus(message, type) {
-    statusDiv.textContent = message;
-    statusDiv.className = `status ${type}`;
-    statusDiv.style.display = 'block';
-
-    if (type === 'success') {
-      setTimeout(() => {
-        statusDiv.style.display = 'none';
-      }, 3000);
-    }
-  }
-
+  /**
+   * Start YouTube channel import process
+   */
   async function startChannelImport() {
     try {
       const channelUrl = channelUrlInput.value.trim();
@@ -252,6 +118,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  /**
+   * Handle import progress updates from background script
+   */
   function handleImportProgress(message) {
     const { current, total, status, videoTitle, completed, error } = message;
 
@@ -263,7 +132,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (error) {
         showImportStatus(`Import completed with errors: ${error}`, 'error');
       } else {
-        showImportStatus(`✅ Successfully imported ${current} of ${total} videos!`, 'success');
+        showImportStatus(`Successfully imported ${current} of ${total} videos!`, 'success');
       }
       return;
     }
@@ -295,6 +164,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     `;
   }
 
+  /**
+   * Show import-specific status message
+   */
   function showImportStatus(message, type) {
     importStatusDiv.innerHTML = `<div class="status ${type}">${message}</div>`;
     importStatusDiv.style.display = 'block';
