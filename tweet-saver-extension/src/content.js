@@ -1,14 +1,29 @@
-// Social Media Note Saver - Content Script
-// Runs on supported social media platforms to inject save buttons
-//
-// Dependencies (loaded via manifest):
-// - DEFAULT_CONFIG, StorageService from utils/config.js
-// - YOUTUBE_SELECTORS from constants/selectors.js
-// - Platform handlers: TwitterHandler, LinkedInHandler, YouTubeHandler
-// - NotesApiClient from services/api-client.js
-// - SaveButton from ui/save-button.js
-// - ActionBarFinder from ui/action-bar-finder.js
-// - replaceTemplatePlaceholders from utils/template-processor.js
+/**
+ * Content Script Entry Point
+ *
+ * Bundles all content script dependencies into a single IIFE.
+ * This allows proper ES module imports while maintaining compatibility
+ * with Chrome's content script injection.
+ */
+
+// Utils and constants
+import { DEFAULT_CONFIG, StorageService } from '../utils/config.js';
+import { replaceTemplatePlaceholders } from '../utils/template-processor.js';
+import { TWITTER_SELECTORS, LINKEDIN_SELECTORS, YOUTUBE_SELECTORS } from '../constants/selectors.js';
+import { PLATFORMS, BUTTON_CONFIG, TIMING, CONTENT_LIMITS, PATTERNS } from '../constants/config.js';
+
+// Platform handlers
+import { BasePlatformHandler } from '../platforms/base-platform-handler.js';
+import { TwitterHandler } from '../platforms/twitter-handler.js';
+import { LinkedInHandler } from '../platforms/linkedin-handler.js';
+import { YouTubeHandler } from '../platforms/youtube-handler.js';
+
+// Services
+import { NotesApiClient } from '../services/api-client.js';
+
+// UI components
+import { SaveButton } from '../ui/save-button.js';
+import { ActionBarFinder } from '../ui/action-bar-finder.js';
 
 /**
  * Detect current platform from hostname
@@ -30,12 +45,6 @@ function detectPlatform() {
 
 /**
  * SocialMediaSaver - Main orchestrator for the content script
- *
- * Responsibilities:
- * - Platform detection and handler instantiation
- * - DOM observation for dynamically loaded posts
- * - Message handling from popup/background
- * - Coordination between platform handlers, UI components, and API client
  */
 class SocialMediaSaver {
   constructor() {
@@ -52,9 +61,6 @@ class SocialMediaSaver {
     this.init();
   }
 
-  /**
-   * Initialize the saver: load config, create handler, start observing
-   */
   async init() {
     console.log('Social Media Note Saver: Initializing on', this.platform, 'at', window.location.href);
 
@@ -63,16 +69,12 @@ class SocialMediaSaver {
 
     if (this.isEnabled) {
       this.startObserving();
-      // Give the page a moment to load completely
       setTimeout(() => this.processPosts(), 1000);
     } else {
       console.log('Social Media Note Saver: Extension disabled, not starting observers');
     }
   }
 
-  /**
-   * Load configuration from storage
-   */
   async loadConfig() {
     try {
       this.config = await StorageService.loadConfig();
@@ -85,9 +87,6 @@ class SocialMediaSaver {
     }
   }
 
-  /**
-   * Create platform-specific handler based on detected platform
-   */
   createPlatformHandler() {
     switch (this.platform) {
       case 'twitter':
@@ -107,7 +106,6 @@ class SocialMediaSaver {
 
     console.log('Social Media Note Saver: Platform handler created for', this.platform);
 
-    // Initialize UI components and API client
     this.actionBarFinder = new ActionBarFinder(
       { [this.platform]: this.platformHandler },
       this.platform
@@ -116,9 +114,6 @@ class SocialMediaSaver {
     console.log('Social Media Note Saver: API client initialized');
   }
 
-  /**
-   * Start observing DOM for dynamically loaded posts
-   */
   startObserving() {
     if (!this.isEnabled) {
       console.log('Social Media Note Saver: Not starting observer - extension disabled');
@@ -139,7 +134,6 @@ class SocialMediaSaver {
           if (node.nodeType !== Node.ELEMENT_NODE) continue;
           if (!node.querySelector) continue;
 
-          // Check if this looks like a post container or video change
           if (this.isRelevantMutation(node)) {
             shouldProcess = true;
             break;
@@ -149,7 +143,6 @@ class SocialMediaSaver {
       }
 
       if (shouldProcess) {
-        // Debounce processing to avoid excessive calls
         if (processingTimeout) {
           clearTimeout(processingTimeout);
         }
@@ -168,20 +161,13 @@ class SocialMediaSaver {
     console.log('Social Media Note Saver: MutationObserver started');
   }
 
-  /**
-   * Check if a DOM mutation is relevant for post processing
-   * @param {Node} node - The added node
-   * @returns {boolean} True if mutation is relevant
-   */
   isRelevantMutation(node) {
-    // LinkedIn feed updates
     if (node.querySelector('[data-view-name="feed-full-update"]') ||
         node.matches('[role="listitem"]') ||
         node.matches('[data-view-name="feed-full-update"]')) {
       return true;
     }
 
-    // YouTube video navigation
     if (this.platform === 'youtube') {
       if (node.matches('#primary') ||
           node.querySelector('#primary') ||
@@ -194,9 +180,6 @@ class SocialMediaSaver {
     return false;
   }
 
-  /**
-   * Stop observing DOM changes
-   */
   stopObserving() {
     if (this.observer) {
       this.observer.disconnect();
@@ -205,13 +188,9 @@ class SocialMediaSaver {
     }
   }
 
-  /**
-   * Process posts on the page and add save buttons
-   */
   processPosts() {
     if (!this.isEnabled || !this.platformHandler) return;
 
-    // Handle YouTube URL changes (video navigation)
     if (this.platform === 'youtube' && window.location.href !== this.currentUrl) {
       console.log('Social Media Note Saver: YouTube URL changed, clearing processed posts');
       this.processedPosts.clear();
@@ -227,10 +206,6 @@ class SocialMediaSaver {
     posts.forEach(post => this.addSaveButton(post));
   }
 
-  /**
-   * Find posts that haven't been processed yet
-   * @returns {Array<Element>} Array of unprocessed post elements
-   */
   findUnprocessedPosts() {
     const posts = this.platformHandler.findPosts();
 
@@ -239,16 +214,11 @@ class SocialMediaSaver {
       if (this.processedPosts.has(postId)) {
         return false;
       }
-      // Only process if it has actual post content
       const content = this.platformHandler.getPostContent(post);
       return content !== null;
     });
   }
 
-  /**
-   * Add save button to a post element
-   * @param {Element} postElement - The post DOM element
-   */
   addSaveButton(postElement) {
     const postId = this.platformHandler.getPostId(postElement);
 
@@ -256,14 +226,12 @@ class SocialMediaSaver {
       return;
     }
 
-    // For YouTube, check for existing buttons globally
     if (this.platform === 'youtube') {
       if (document.querySelectorAll(YOUTUBE_SELECTORS.saveButtons).length > 0) {
         this.processedPosts.add(postId);
         return;
       }
     } else {
-      // Check if button already exists on this specific post
       if (postElement.querySelector('.social-save-btn')) {
         this.processedPosts.add(postId);
         return;
@@ -272,7 +240,6 @@ class SocialMediaSaver {
 
     this.processedPosts.add(postId);
 
-    // Find action bar for button placement
     const actionBar = this.actionBarFinder.findActionBar(postElement);
     if (!actionBar) {
       console.log('Social Media Note Saver: Could not find action bar for post');
@@ -281,22 +248,15 @@ class SocialMediaSaver {
 
     console.log('Social Media Note Saver: Adding save button to post:', postId);
 
-    // Create and configure save button
     const saveButtonInstance = new SaveButton(this.platform, async () => {
       await this.savePost(postElement, saveButtonInstance);
     });
     const saveButton = saveButtonInstance.createElement();
 
-    // Insert button and configure action bar layout
     actionBar.appendChild(saveButton);
     this.configureActionBarLayout(actionBar, saveButton);
   }
 
-  /**
-   * Configure action bar flexbox layout for button placement
-   * @param {Element} actionBar - The action bar element
-   * @param {Element} saveButton - The save button element
-   */
   configureActionBarLayout(actionBar, saveButton) {
     actionBar.style.display = 'flex';
     actionBar.style.alignItems = 'center';
@@ -306,22 +266,15 @@ class SocialMediaSaver {
     saveButton.style.position = 'relative';
     saveButton.style.zIndex = '1000';
 
-    // YouTube-specific visibility enhancements
     if (this.platform === 'youtube') {
       saveButton.style.border = '2px solid #1976d2 !important';
       saveButton.style.transform = 'scale(1.1) !important';
     }
 
-    // Prevent event bubbling
     saveButton.addEventListener('mouseenter', e => e.stopPropagation());
     saveButton.addEventListener('mouseleave', e => e.stopPropagation());
   }
 
-  /**
-   * Save a post to the notes API
-   * @param {Element} postElement - The post DOM element
-   * @param {SaveButton} saveButtonInstance - The save button instance
-   */
   async savePost(postElement, saveButtonInstance) {
     try {
       saveButtonInstance.setLoading();
@@ -343,11 +296,6 @@ class SocialMediaSaver {
     }
   }
 
-  /**
-   * Extract all post data using the platform handler
-   * @param {Element} postElement - The post DOM element
-   * @returns {Object} Post data object
-   */
   async extractPostData(postElement) {
     const shareInfo = this.platformHandler.getShareInfo(postElement);
     const metrics = this.platformHandler.getMetrics(postElement);
@@ -366,10 +314,6 @@ class SocialMediaSaver {
     };
   }
 
-  /**
-   * Handle extension toggle from popup
-   * @param {boolean} enabled - Whether extension is enabled
-   */
   handleExtensionToggle(enabled) {
     this.isEnabled = enabled;
     console.log('Social Media Note Saver: Extension', enabled ? 'enabled' : 'disabled');
@@ -383,15 +327,7 @@ class SocialMediaSaver {
     }
   }
 
-  // ============================================================================
-  // YouTube-specific methods for channel import feature
-  // ============================================================================
-
-  /**
-   * Scrape channel videos (delegates to YouTube handler)
-   * @param {number} limit - Maximum videos to scrape
-   * @returns {Promise<Array>} Array of video objects
-   */
+  // YouTube-specific methods
   async scrapeChannelVideos(limit = 20) {
     if (this.platform !== 'youtube' || !this.platformHandler) {
       throw new Error('YouTube handler not available');
@@ -399,10 +335,6 @@ class SocialMediaSaver {
     return this.platformHandler.scrapeChannelVideos(limit);
   }
 
-  /**
-   * Extract and save transcript for current video
-   * @returns {Promise<Object>} Result object with success status
-   */
   async extractAndSaveTranscript() {
     if (this.platform !== 'youtube' || !this.platformHandler) {
       throw new Error('YouTube handler not available');
@@ -414,7 +346,6 @@ class SocialMediaSaver {
       return result;
     }
 
-    // Complete the save by sending to API
     const payload = replaceTemplatePlaceholders(this.config.payloadTemplate, result.postData);
     const apiResult = await this.apiClient.saveNote(payload);
 
@@ -433,15 +364,9 @@ class SocialMediaSaver {
   }
 }
 
-// ============================================================================
 // Global instance and message handling
-// ============================================================================
-
 let socialMediaSaver;
 
-/**
- * Handle messages from popup and background script
- */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('Social Media Note Saver: Received message:', message.action);
 
@@ -483,10 +408,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-// ============================================================================
-// Initialization
-// ============================================================================
-
+// Initialize when DOM is ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
     socialMediaSaver = new SocialMediaSaver();

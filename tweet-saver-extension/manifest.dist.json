@@ -15,7 +15,7 @@
       "http://127.0.0.1:*/*"
     ]
   },
-  
+
   "host_permissions": [
     "https://twitter.com/*",
     "https://x.com/*",
@@ -26,7 +26,7 @@
     "http://localhost:*/*",
     "https://*/*"
   ],
-  
+
   "content_scripts": [
     {
       "matches": [
@@ -37,7 +37,7 @@
         "https://youtube.com/*",
         "https://www.youtube.com/*"
       ],
-      "js": ["utils/config.js", "utils/template-processor.js", "constants/selectors.js", "constants/config.js", "platforms/base-platform-handler.js", "platforms/twitter-handler.js", "platforms/linkedin-handler.js", "platforms/youtube-handler.js", "services/api-client.js", "ui/save-button.js", "ui/action-bar-finder.js", "content.js"],
+      "js": ["content.js"],
       "css": ["styles.css"],
       "run_at": "document_end"
     },
@@ -50,19 +50,19 @@
       "run_at": "document_end"
     }
   ],
-  
+
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
-  
+
   "action": {
     "default_popup": "popup.html",
     "default_title": "Social Media Note Saver Settings"
   },
-  
+
   "options_page": "options.html",
-  
+
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",

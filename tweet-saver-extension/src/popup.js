@@ -1,6 +1,8 @@
-// Social Media Note Saver - Popup Script
+/**
+ * Popup Script Entry Point
+ */
 
-import { ConfigManager } from './ui/config-manager.js';
+import { ConfigManager } from '../ui/config-manager.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
   // DOM elements
@@ -15,7 +17,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const importChannelButton = document.getElementById('importChannel');
   const importStatusDiv = document.getElementById('importStatus');
 
-  // Initialize ConfigManager for shared config operations
+  // Initialize ConfigManager
   const configManager = new ConfigManager({
     apiEndpointInput,
     payloadTemplateTextarea,
@@ -23,7 +25,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     testAPIButton
   });
 
-  // Load current configuration
   await configManager.loadConfig(extensionEnabledToggle);
 
   // Event listeners
@@ -32,52 +33,38 @@ document.addEventListener('DOMContentLoaded', async () => {
   testAPIButton.addEventListener('click', () => configManager.testAPI());
   importChannelButton.addEventListener('click', startChannelImport);
 
-  // Listen for progress updates from background script
+  // Listen for progress updates
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'importProgress') {
       handleImportProgress(message);
     }
   });
 
-  /**
-   * Toggle extension enabled state
-   */
   async function toggleExtension() {
     try {
       const isEnabled = extensionEnabledToggle.checked;
-
       await chrome.storage.sync.set({ extensionEnabled: isEnabled });
-
       configManager.showStatus(
         isEnabled ? 'Extension enabled!' : 'Extension disabled!',
         'success'
       );
-
-      // Notify content scripts about the change
       await configManager.notifyContentScripts('extensionToggled', { enabled: isEnabled });
-
     } catch (error) {
       configManager.showStatus('Error toggling extension: ' + error.message, 'error');
-      // Revert toggle state on error
       extensionEnabledToggle.checked = !extensionEnabledToggle.checked;
     }
   }
 
-  /**
-   * Start YouTube channel import process
-   */
   async function startChannelImport() {
     try {
       const channelUrl = channelUrlInput.value.trim();
       const limit = parseInt(videoLimitSelect.value);
 
-      // Validate input
       if (!channelUrl) {
         showImportStatus('Please enter a YouTube channel URL', 'error');
         return;
       }
 
-      // Validate URL
       try {
         const url = new URL(channelUrl);
         if (!url.hostname.includes('youtube.com')) {
@@ -89,11 +76,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
 
-      // Disable button during import
       importChannelButton.disabled = true;
       importChannelButton.textContent = 'Importing...';
 
-      // Show initial status with progress bar
       importStatusDiv.innerHTML = `
         <div class="status info">
           <div>Starting import...</div>
@@ -104,7 +89,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       `;
       importStatusDiv.style.display = 'block';
 
-      // Send message to background script
       chrome.runtime.sendMessage({
         action: 'importChannel',
         channelUrl: channelUrl,
@@ -118,14 +102,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  /**
-   * Handle import progress updates from background script
-   */
   function handleImportProgress(message) {
     const { current, total, status, videoTitle, completed, error } = message;
 
     if (completed) {
-      // Import finished
       importChannelButton.disabled = false;
       importChannelButton.textContent = 'Import Transcripts';
 
@@ -137,7 +117,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    // Update progress
     const percentage = total > 0 ? (current / total) * 100 : 0;
     const progressFill = document.getElementById('progressFill');
 
@@ -145,14 +124,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       progressFill.style.width = `${percentage}%`;
     }
 
-    // Update status text
     let statusText = `Processing video ${current} of ${total}`;
-    if (videoTitle) {
-      statusText += `: ${videoTitle}`;
-    }
-    if (status) {
-      statusText += ` - ${status}`;
-    }
+    if (videoTitle) statusText += `: ${videoTitle}`;
+    if (status) statusText += ` - ${status}`;
 
     importStatusDiv.innerHTML = `
       <div class="status info">
@@ -164,9 +138,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     `;
   }
 
-  /**
-   * Show import-specific status message
-   */
   function showImportStatus(message, type) {
     importStatusDiv.innerHTML = `<div class="status ${type}">${message}</div>`;
     importStatusDiv.style.display = 'block';

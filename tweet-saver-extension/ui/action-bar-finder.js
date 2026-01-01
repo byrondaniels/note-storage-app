@@ -22,3 +22,11 @@ class ActionBarFinder {
     return container;
   }
 }
+
+// Export for ES6 modules
+export { ActionBarFinder };
+
+// Also make available globally for content scripts (when loaded as regular script)
+if (typeof window !== 'undefined') {
+  window.ActionBarFinder = ActionBarFinder;
+}

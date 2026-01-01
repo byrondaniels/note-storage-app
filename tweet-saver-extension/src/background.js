@@ -1,8 +1,10 @@
-// Social Media Note Saver - Background Script (Service Worker)
+/**
+ * Background Service Worker Entry Point
+ */
 
-import { DEFAULT_CONFIG, StorageService } from './utils/config.js';
-import { NotesApiClient } from './services/api-client.js';
-import { channelImportService } from './services/channel-import.js';
+import { DEFAULT_CONFIG, StorageService } from '../utils/config.js';
+import { NotesApiClient } from '../services/api-client.js';
+import { channelImportService } from '../services/channel-import.js';
 
 // Handle extension installation
 chrome.runtime.onInstalled.addListener((details) => {
@@ -38,7 +40,6 @@ chrome.runtime.onMessageExternal.addListener((request, sender, sendResponse) => 
   }
 
   if (request.action === 'importChannel') {
-    // Store the sender tab ID for progress updates
     externalSenderTabId = sender.tab ? sender.tab.id : null;
     console.log('Social Media Note Saver: External import request, sender tab:', externalSenderTabId);
 
@@ -50,7 +51,7 @@ chrome.runtime.onMessageExternal.addListener((request, sender, sendResponse) => 
         console.error('Social Media Note Saver: External import failed:', error);
         sendResponse({ success: false, error: error.message });
       });
-    return true; // Required for async response
+    return true;
   }
 });
 
@@ -60,7 +61,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     chrome.storage.sync.get(['apiEndpoint', 'payloadTemplate'], (result) => {
       sendResponse(result);
     });
-    return true; // Required for async response
+    return true;
   }
 
   if (request.action === 'saveConfig') {
@@ -71,7 +72,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'testAPI') {
-    // Test API endpoint using ApiClient
     const apiClient = new NotesApiClient(request.endpoint);
     apiClient.testConnection(request.payload)
       .then(result => sendResponse(result))
@@ -80,7 +80,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'importChannel') {
-    // Handle channel import request
     channelImportService.handleChannelImport(request.channelUrl, request.limit || 20)
       .then(() => {
         sendResponse({ success: true });
@@ -89,6 +88,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         console.error('Social Media Note Saver: Import failed:', error);
         sendResponse({ success: false, error: error.message });
       });
-    return true; // Required for async response
+    return true;
   }
 });
