@@ -40,6 +40,14 @@ class SocialMediaSaver {
     this.isEnabled = true;
     this.observer = null;
     this.currentUrl = window.location.href;
+
+    // Initialize platform handlers
+    this.platformHandlers = {
+      twitter: null,
+      linkedin: null,
+      youtube: null
+    };
+
     this.init();
   }
 
@@ -62,7 +70,8 @@ class SocialMediaSaver {
   async init() {
     console.log('Social Media Note Saver: Initializing on', this.platform, 'at', window.location.href);
     await this.loadConfig();
-    
+    this.initializePlatformHandlers();
+
     if (this.isEnabled) {
       this.startObserving();
       // Give the page a moment to load completely
@@ -85,6 +94,13 @@ class SocialMediaSaver {
       this.config = { ...DEFAULT_CONFIG };
       this.isEnabled = true;
     }
+  }
+
+  initializePlatformHandlers() {
+    // Initialize platform-specific handlers
+    this.platformHandlers.twitter = new TwitterHandler(this.config);
+    // LinkedIn and YouTube handlers will be added later
+    console.log('Social Media Note Saver: Platform handlers initialized');
   }
 
   startObserving() {
@@ -180,30 +196,21 @@ class SocialMediaSaver {
   }
 
   findPosts() {
-    if (this.platform === 'twitter') {
-      return this.findTwitterPosts();
-    }
-    if (this.platform === 'linkedin') {
-      return this.findLinkedInPosts();
-    }
-    if (this.platform === 'youtube') {
-      return this.findYouTubeVideos();
-    }
-    // Future platforms can be added here
-    return [];
-  }
-
-  findTwitterPosts() {
-    // Twitter/X uses various selectors depending on the page structure
-    let posts = [];
-    for (const selector of TWITTER_SELECTORS.posts) {
-      const elements = document.querySelectorAll(selector);
-      if (elements.length > 0) {
-        posts = Array.from(elements);
-        break;
+    const handler = this.platformHandlers[this.platform];
+    if (!handler) {
+      // Fallback for platforms without handlers yet
+      if (this.platform === 'linkedin') {
+        return this.findLinkedInPosts();
       }
+      if (this.platform === 'youtube') {
+        return this.findYouTubeVideos();
+      }
+      return [];
     }
-    
+
+    // Use platform handler to find posts
+    let posts = handler.findPosts();
+
     // Filter out already processed posts
     return posts.filter(post => {
       const postId = this.getPostId(post);
@@ -216,9 +223,12 @@ class SocialMediaSaver {
   }
 
   getPostId(postElement) {
-    if (this.platform === 'twitter') {
-      return this.getTwitterId(postElement);
+    const handler = this.platformHandlers[this.platform];
+    if (handler) {
+      return handler.getPostId(postElement);
     }
+
+    // Fallback for platforms without handlers yet
     if (this.platform === 'linkedin') {
       return this.getLinkedInId(postElement);
     }
@@ -229,9 +239,12 @@ class SocialMediaSaver {
   }
 
   async getPostContent(postElement) {
-    if (this.platform === 'twitter') {
-      return this.getTwitterContent(postElement);
+    const handler = this.platformHandlers[this.platform];
+    if (handler) {
+      return handler.getPostContent(postElement);
     }
+
+    // Fallback for platforms without handlers yet
     if (this.platform === 'linkedin') {
       return await this.getLinkedInContent(postElement);
     }
@@ -242,9 +255,13 @@ class SocialMediaSaver {
   }
 
   hasPostContent(postElement) {
-    if (this.platform === 'twitter') {
-      return this.getTwitterContent(postElement) !== null;
+    const handler = this.platformHandlers[this.platform];
+    if (handler) {
+      const content = handler.getPostContent(postElement);
+      return content !== null;
     }
+
+    // Fallback for platforms without handlers yet
     if (this.platform === 'linkedin') {
       return this.hasLinkedInContent(postElement);
     }
@@ -270,9 +287,12 @@ class SocialMediaSaver {
   }
 
   getPostAuthor(postElement) {
-    if (this.platform === 'twitter') {
-      return this.getTwitterAuthor(postElement);
+    const handler = this.platformHandlers[this.platform];
+    if (handler) {
+      return handler.getPostAuthor(postElement);
     }
+
+    // Fallback for platforms without handlers yet
     if (this.platform === 'linkedin') {
       return this.getLinkedInAuthor(postElement);
     }
@@ -284,9 +304,12 @@ class SocialMediaSaver {
   }
 
   getPostHandle(postElement) {
-    if (this.platform === 'twitter') {
-      return this.getTwitterHandle(postElement);
+    const handler = this.platformHandlers[this.platform];
+    if (handler) {
+      return handler.getPostHandle(postElement);
     }
+
+    // Fallback for platforms without handlers yet
     if (this.platform === 'linkedin') {
       return this.getLinkedInHandle(postElement);
     }
@@ -298,9 +321,12 @@ class SocialMediaSaver {
   }
 
   getPostUrl(postElement) {
-    if (this.platform === 'twitter') {
-      return this.getTwitterUrl(postElement);
+    const handler = this.platformHandlers[this.platform];
+    if (handler) {
+      return handler.getPostUrl(postElement);
     }
+
+    // Fallback for platforms without handlers yet
     if (this.platform === 'linkedin') {
       return this.getLinkedInUrl(postElement);
     }
@@ -312,9 +338,12 @@ class SocialMediaSaver {
   }
 
   getPostTimestamp(postElement) {
-    if (this.platform === 'twitter') {
-      return this.getTwitterTimestamp(postElement);
+    const handler = this.platformHandlers[this.platform];
+    if (handler) {
+      return handler.getPostTimestamp(postElement);
     }
+
+    // Fallback for platforms without handlers yet
     if (this.platform === 'linkedin') {
       return this.getLinkedInTimestamp(postElement);
     }
@@ -322,9 +351,12 @@ class SocialMediaSaver {
   }
 
   getShareInfo(postElement) {
-    if (this.platform === 'twitter') {
-      return this.getTwitterRetweetInfo(postElement);
+    const handler = this.platformHandlers[this.platform];
+    if (handler) {
+      return handler.getShareInfo(postElement);
     }
+
+    // Fallback for platforms without handlers yet
     if (this.platform === 'linkedin') {
       return this.getLinkedInShareInfo(postElement);
     }
@@ -332,9 +364,12 @@ class SocialMediaSaver {
   }
 
   getPostMetrics(postElement) {
-    if (this.platform === 'twitter') {
-      return this.getTwitterMetrics(postElement);
+    const handler = this.platformHandlers[this.platform];
+    if (handler) {
+      return handler.getMetrics(postElement);
     }
+
+    // Fallback for platforms without handlers yet
     if (this.platform === 'linkedin') {
       return this.getLinkedInMetrics(postElement);
     }
@@ -1152,188 +1187,6 @@ class SocialMediaSaver {
     }
   }
 
-  // Twitter-specific implementations below
-  getTwitterId(tweetElement) {
-    // Try to get a unique identifier for the tweet
-    const link = tweetElement.querySelector('a[href*="/status/"]');
-    if (link) {
-      const href = link.getAttribute('href');
-      const match = href.match(/\/status\/(\d+)/);
-      if (match) return match[1];
-    }
-    
-    // Fallback to element's position and content
-    const content = this.getTwitterContent(tweetElement);
-    return content ? btoa(content.substring(0, 50)) : Math.random().toString();
-  }
-
-  getTwitterContent(tweetElement) {
-    // Try different selectors for tweet text
-    for (const selector of TWITTER_SELECTORS.content) {
-      const textElement = tweetElement.querySelector(selector);
-      if (textElement && textElement.textContent.trim()) {
-        return textElement.textContent.trim();
-      }
-    }
-    
-    return null;
-  }
-
-  getTwitterAuthor(tweetElement) {
-    // Try different selectors for author
-    for (const selector of TWITTER_SELECTORS.author) {
-      const authorElement = tweetElement.querySelector(selector);
-      if (authorElement) {
-        const text = authorElement.textContent.trim();
-        if (text && !text.includes('·') && !text.includes('•') && !text.includes('@')) {
-          return text;
-        }
-      }
-    }
-    
-    // Fallback: try to get from URL
-    const link = tweetElement.querySelector(TWITTER_SELECTORS.link);
-    if (link) {
-      const href = link.getAttribute('href');
-      const match = href.match(PATTERNS.twitterHandle);
-      if (match) return match[1];
-    }
-    
-    return 'Unknown';
-  }
-
-  getTwitterHandle(tweetElement) {
-    // Get the @handle
-    for (const selector of TWITTER_SELECTORS.handle) {
-      const elements = tweetElement.querySelectorAll(selector);
-      for (const element of elements) {
-        const text = element.textContent.trim();
-        if (text.startsWith('@')) {
-          return text;
-        }
-      }
-    }
-    
-    // Try to find any span with @username pattern
-    const spans = tweetElement.querySelectorAll('span');
-    for (const span of spans) {
-      const text = span.textContent.trim();
-      if (text.startsWith('@') && text.length > 1 && !text.includes(' ')) {
-        return text;
-      }
-    }
-    
-    // Fallback: try to get from URL
-    const link = tweetElement.querySelector(TWITTER_SELECTORS.link);
-    if (link) {
-      const href = link.getAttribute('href');
-      const match = href.match(PATTERNS.twitterHandle);
-      if (match) return '@' + match[1];
-    }
-
-    return '@unknown';
-  }
-
-  getTwitterRetweetInfo(tweetElement) {
-    // Check if this is a retweet
-    for (const selector of TWITTER_SELECTORS.retweetIndicators) {
-      const elements = tweetElement.querySelectorAll(selector);
-      for (const element of elements) {
-        const text = element.textContent.trim();
-        if (text.includes('retweeted') || text.includes('Retweeted')) {
-          // Try to extract who retweeted
-          const match = text.match(/(.+?)\s+retweeted/i);
-          if (match) {
-            return {
-              isShare: true,
-              sharedBy: match[1].trim(),
-              shareContext: text
-            };
-          }
-          return {
-            isShare: true,
-            sharedBy: 'Someone',
-            shareContext: text
-          };
-        }
-      }
-    }
-    
-    // Alternative approach: look for retweet icon
-    const retweetIcon = tweetElement.querySelector('[data-testid="retweet"]');
-    if (retweetIcon && retweetIcon.closest('[role="group"]')) {
-      const parentElement = retweetIcon.closest('article') || tweetElement;
-      const socialContext = parentElement.querySelector('[data-testid="socialContext"]');
-      if (socialContext) {
-        return {
-          isShare: true,
-          sharedBy: 'Someone',
-          shareContext: socialContext.textContent.trim()
-        };
-      }
-    }
-    
-    return { isShare: false };
-  }
-
-  getTwitterMetrics(tweetElement) {
-    // Get engagement metrics if visible
-    const metrics = {};
-    
-    const metricsSelectors = [
-      '[data-testid="reply"]',
-      '[data-testid="retweet"]', 
-      '[data-testid="like"]',
-      '[data-testid="bookmark"]'
-    ];
-    
-    metricsSelectors.forEach(selector => {
-      const element = tweetElement.querySelector(selector);
-      if (element) {
-        const span = element.querySelector('span[data-testid]');
-        if (span && span.textContent.trim()) {
-          const type = selector.replace('[data-testid="', '').replace('"]', '');
-          metrics[type] = span.textContent.trim();
-        }
-      }
-    });
-    
-    return metrics;
-  }
-
-  getTwitterUrl(tweetElement) {
-    const link = tweetElement.querySelector('a[href*="/status/"]');
-    if (link) {
-      const href = link.getAttribute('href');
-      if (href.startsWith('/')) {
-        return window.location.origin + href;
-      }
-      return href;
-    }
-    return window.location.href;
-  }
-
-  getTwitterTimestamp(tweetElement) {
-    // Try to find timestamp
-    const timeSelectors = [
-      'time',
-      '[datetime]',
-      '.tweet-timestamp',
-      '[data-testid="Time"]'
-    ];
-    
-    for (const selector of timeSelectors) {
-      const timeElement = tweetElement.querySelector(selector);
-      if (timeElement) {
-        const datetime = timeElement.getAttribute('datetime') || timeElement.getAttribute('title');
-        if (datetime) {
-          return new Date(datetime).toISOString();
-        }
-      }
-    }
-    
-    return new Date().toISOString();
-  }
 
   addSaveButton(postElement) {
     const postId = this.getPostId(postElement);
@@ -1413,17 +1266,19 @@ class SocialMediaSaver {
   }
 
   findActionBar(postElement) {
-    // Platform-specific action bar finding
-    if (this.platform === 'twitter') {
-      return this.findTwitterActionBar(postElement);
+    const handler = this.platformHandlers[this.platform];
+    if (handler) {
+      return handler.findActionBar(postElement);
     }
+
+    // Fallback for platforms without handlers yet
     if (this.platform === 'linkedin') {
       return this.findLinkedInActionBar(postElement);
     }
     if (this.platform === 'youtube') {
       return this.findYouTubeActionBar(postElement);
     }
-    
+
     // Generic fallback
     const container = document.createElement('div');
     container.className = 'social-saver-actions';
@@ -1528,32 +1383,6 @@ class SocialMediaSaver {
     return null;
   }
 
-  findTwitterActionBar(postElement) {
-    // Try to find the Twitter action bar (like, retweet, share buttons)
-    const actionSelectors = [
-      '[role="group"]',
-      '.tweet-actions',
-      '[data-testid="reply"]',
-      '[data-testid="retweet"]'
-    ];
-    
-    for (const selector of actionSelectors) {
-      const element = postElement.querySelector(selector);
-      if (element) {
-        // If we found a specific action, get its parent container
-        if (selector.includes('data-testid')) {
-          return element.closest('[role="group"]') || element.parentElement;
-        }
-        return element;
-      }
-    }
-    
-    // Fallback: create our own action container
-    const container = document.createElement('div');
-    container.className = 'social-saver-actions';
-    postElement.appendChild(container);
-    return container;
-  }
 
   findLinkedInActionBar(postElement) {
     // Try to find the container that holds all the action buttons
