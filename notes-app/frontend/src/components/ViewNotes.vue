@@ -444,12 +444,17 @@ import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
 import { API_URL } from '../utils/api'
 import BaseModal from './shared/BaseModal.vue'
 import CategoryBadge from './shared/CategoryBadge.vue'
+import { useApi } from '../composables/useApi'
 
 export default {
   name: 'ViewNotes',
   components: {
     BaseModal,
     CategoryBadge
+  },
+  setup() {
+    const api = useApi()
+    return { api }
   },
   data() {
     return {
@@ -571,23 +576,15 @@ export default {
     formatDate,
     getPreview,
     async fetchNotes() {
-      this.loading = true
-      this.error = ''
-
-      try {
+      await this.api.request(async () => {
         const response = await axios.get(`${API_URL}/notes`)
         this.notes = response.data.sort((a, b) => new Date(b.created) - new Date(a.created))
-        
+
         // Auto-select the first note if available
         if (this.notes.length > 0 && !this.selectedNote) {
           this.selectedNote = this.notes[0]
         }
-      } catch (error) {
-        this.error = 'Error loading notes. Please try again.'
-        console.error('Error:', error)
-      } finally {
-        this.loading = false
-      }
+      })
     },
     async refreshNotes() {
       await this.fetchNotes()
@@ -616,23 +613,23 @@ export default {
       if (!this.searchQuery.trim()) return
 
       this.isSearching = true
-
       try {
-        const response = await axios.post(`${API_URL}/search`, {
-          query: this.searchQuery.trim(),
-          limit: 50 // Get more results for search
+        await this.api.request(async () => {
+          const response = await axios.post(`${API_URL}/search`, {
+            query: this.searchQuery.trim(),
+            limit: 50 // Get more results for search
+          })
+
+          this.searchResults = response.data || []
+
+          // Auto-select first search result if available
+          if (this.searchResults.length > 0) {
+            this.selectedNote = this.searchResults[0].note
+          } else {
+            this.selectedNote = null
+          }
         })
-        
-        this.searchResults = response.data || []
-        
-        // Auto-select first search result if available
-        if (this.searchResults.length > 0) {
-          this.selectedNote = this.searchResults[0].note
-        } else {
-          this.selectedNote = null
-        }
       } catch (error) {
-        console.error('Search error:', error)
         this.searchResults = []
         this.selectedNote = null
       } finally {
@@ -657,20 +654,19 @@ export default {
     },
     async loadCategories() {
       this.categoriesLoading = true
-
       try {
-        const response = await axios.get(`${API_URL}/categories`)
-        this.categories = response.data || []
-        
-        // Sort categories: ones with notes first, then alphabetically
-        this.categories.sort((a, b) => {
-          if (a.count !== b.count) {
-            return b.count - a.count // Higher count first
-          }
-          return a.name.localeCompare(b.name) // Alphabetical for same count
+        await this.api.request(async () => {
+          const response = await axios.get(`${API_URL}/categories`)
+          this.categories = response.data || []
+
+          // Sort categories: ones with notes first, then alphabetically
+          this.categories.sort((a, b) => {
+            if (a.count !== b.count) {
+              return b.count - a.count // Higher count first
+            }
+            return a.name.localeCompare(b.name) // Alphabetical for same count
+          })
         })
-      } catch (error) {
-        console.error('Error loading categories:', error)
       } finally {
         this.categoriesLoading = false
       }
@@ -685,17 +681,18 @@ export default {
       this.selectedCategory = categoryName
 
       try {
-        const response = await axios.get(`${API_URL}/notes/category/${categoryName}`)
-        this.filteredNotes = response.data || []
-        
-        // Auto-select first filtered note if available
-        if (this.filteredNotes.length > 0) {
-          this.selectedNote = this.filteredNotes[0]
-        } else {
-          this.selectedNote = null
-        }
+        await this.api.request(async () => {
+          const response = await axios.get(`${API_URL}/notes/category/${categoryName}`)
+          this.filteredNotes = response.data || []
+
+          // Auto-select first filtered note if available
+          if (this.filteredNotes.length > 0) {
+            this.selectedNote = this.filteredNotes[0]
+          } else {
+            this.selectedNote = null
+          }
+        })
       } catch (error) {
-        console.error('Error loading category notes:', error)
         this.filteredNotes = []
         this.selectedNote = null
       }
@@ -870,54 +867,55 @@ export default {
       this.saving = true
 
       try {
-        if (this.isCreatingNote) {
-          // Create new note (title will be auto-generated)
-          const response = await axios.post(`${API_URL}/notes`, {
-            content: this.editForm.content.trim()
-          })
+        await this.api.request(async () => {
+          if (this.isCreatingNote) {
+            // Create new note (title will be auto-generated)
+            const response = await axios.post(`${API_URL}/notes`, {
+              content: this.editForm.content.trim()
+            })
 
-          const newNote = response.data
+            const newNote = response.data
 
-          // Add to notes array
-          this.notes.unshift(newNote)
+            // Add to notes array
+            this.notes.unshift(newNote)
 
-          // Select the new note
-          this.selectedNote = newNote
-          this.isCreatingNote = false
-        } else {
-          // Update existing note (content only, title will be auto-generated)
-          const response = await axios.put(`${API_URL}/notes/${this.editForm.id}`, {
-            content: this.editForm.content.trim()
-          })
-          
-          const updatedNote = response.data
-          
-          // Update in notes array
-          const noteIndex = this.notes.findIndex(n => n.id === updatedNote.id)
-          if (noteIndex !== -1) {
-            this.notes[noteIndex] = updatedNote
-          }
-          
-          // Update in filtered notes if applicable
-          if (this.selectedCategory && this.filteredNotes.length > 0) {
-            const filteredIndex = this.filteredNotes.findIndex(n => n.id === updatedNote.id)
-            if (filteredIndex !== -1) {
-              this.filteredNotes[filteredIndex] = updatedNote
+            // Select the new note
+            this.selectedNote = newNote
+            this.isCreatingNote = false
+          } else {
+            // Update existing note (content only, title will be auto-generated)
+            const response = await axios.put(`${API_URL}/notes/${this.editForm.id}`, {
+              content: this.editForm.content.trim()
+            })
+
+            const updatedNote = response.data
+
+            // Update in notes array
+            const noteIndex = this.notes.findIndex(n => n.id === updatedNote.id)
+            if (noteIndex !== -1) {
+              this.notes[noteIndex] = updatedNote
             }
+
+            // Update in filtered notes if applicable
+            if (this.selectedCategory && this.filteredNotes.length > 0) {
+              const filteredIndex = this.filteredNotes.findIndex(n => n.id === updatedNote.id)
+              if (filteredIndex !== -1) {
+                this.filteredNotes[filteredIndex] = updatedNote
+              }
+            }
+
+            // Update selected note
+            this.selectedNote = updatedNote
+            this.isEditMode = false
           }
-          
-          // Update selected note
-          this.selectedNote = updatedNote
-          this.isEditMode = false
-        }
-        
-        // Reload categories to update counts
-        await this.loadCategories()
-        
-        this.editForm = { id: null, title: '', content: '' }
-        this.originalContent = ''
+
+          // Reload categories to update counts
+          await this.loadCategories()
+
+          this.editForm = { id: null, title: '', content: '' }
+          this.originalContent = ''
+        })
       } catch (error) {
-        console.error('Error saving note:', error)
         alert('Failed to save note. Please try again.')
       } finally {
         this.saving = false
@@ -939,33 +937,34 @@ export default {
       this.deleting = true
 
       try {
-        await axios.delete(`${API_URL}/notes/${this.noteToDelete.id}`)
-        
-        // Remove from notes array
-        this.notes = this.notes.filter(n => n.id !== this.noteToDelete.id)
-        
-        // Remove from filtered notes if applicable
-        if (this.filteredNotes.length > 0) {
-          this.filteredNotes = this.filteredNotes.filter(n => n.id !== this.noteToDelete.id)
-        }
-        
-        // Remove from search results if applicable
-        if (this.searchResults.length > 0) {
-          this.searchResults = this.searchResults.filter(r => r.note.id !== this.noteToDelete.id)
-        }
-        
-        // Select a new note if the deleted note was selected
-        if (this.selectedNote && this.selectedNote.id === this.noteToDelete.id) {
-          const remainingNotes = this.displayedNotes
-          this.selectedNote = remainingNotes.length > 0 ? remainingNotes[0] : null
-        }
-        
-        // Reload categories to update counts
-        await this.loadCategories()
-        
-        this.cancelDelete()
+        await this.api.request(async () => {
+          await axios.delete(`${API_URL}/notes/${this.noteToDelete.id}`)
+
+          // Remove from notes array
+          this.notes = this.notes.filter(n => n.id !== this.noteToDelete.id)
+
+          // Remove from filtered notes if applicable
+          if (this.filteredNotes.length > 0) {
+            this.filteredNotes = this.filteredNotes.filter(n => n.id !== this.noteToDelete.id)
+          }
+
+          // Remove from search results if applicable
+          if (this.searchResults.length > 0) {
+            this.searchResults = this.searchResults.filter(r => r.note.id !== this.noteToDelete.id)
+          }
+
+          // Select a new note if the deleted note was selected
+          if (this.selectedNote && this.selectedNote.id === this.noteToDelete.id) {
+            const remainingNotes = this.displayedNotes
+            this.selectedNote = remainingNotes.length > 0 ? remainingNotes[0] : null
+          }
+
+          // Reload categories to update counts
+          await this.loadCategories()
+
+          this.cancelDelete()
+        })
       } catch (error) {
-        console.error('Error deleting note:', error)
         alert('Failed to delete note. Please try again.')
       } finally {
         this.deleting = false
@@ -1051,14 +1050,15 @@ export default {
       this.aiResponse = ''
 
       try {
-        const response = await axios.post(`${API_URL}/ai-question`, {
-          content: this.selectedNote.content,
-          prompt: this.aiPrompt.trim()
+        await this.api.request(async () => {
+          const response = await axios.post(`${API_URL}/ai-question`, {
+            content: this.selectedNote.content,
+            prompt: this.aiPrompt.trim()
+          })
+
+          this.aiResponse = response.data.response || 'No response received from AI.'
         })
-        
-        this.aiResponse = response.data.response || 'No response received from AI.'
       } catch (error) {
-        console.error('AI question error:', error)
         this.aiResponse = 'Sorry, there was an error getting a response from AI. Please try again.'
       } finally {
         this.aiLoading = false
@@ -1098,39 +1098,39 @@ export default {
       this.summarizing = true
 
       try {
-        const response = await axios.post(`${API_URL}/summarize`, {
-          noteId: this.selectedNote.id,
-          content: this.selectedNote.content
-        })
+        await this.api.request(async () => {
+          const response = await axios.post(`${API_URL}/summarize`, {
+            noteId: this.selectedNote.id,
+            content: this.selectedNote.content
+          })
 
-        // Update the selected note with the new summary, structured data, and timestamp
-        const now = new Date().toISOString()
-        this.selectedNote.summary = response.data.summary
-        this.selectedNote.structuredData = response.data.structuredData
-        this.selectedNote.lastSummarizedAt = now
+          // Update the selected note with the new summary, structured data, and timestamp
+          const now = new Date().toISOString()
+          this.selectedNote.summary = response.data.summary
+          this.selectedNote.structuredData = response.data.structuredData
+          this.selectedNote.lastSummarizedAt = now
 
-        // Update the note in the notes array
-        const noteIndex = this.notes.findIndex(n => n.id === this.selectedNote.id)
-        if (noteIndex !== -1) {
-          this.notes[noteIndex].summary = response.data.summary
-          this.notes[noteIndex].structuredData = response.data.structuredData
-          this.notes[noteIndex].lastSummarizedAt = now
-        }
-
-        // Update in filtered notes if applicable
-        if (this.selectedCategory && this.filteredNotes.length > 0) {
-          const filteredIndex = this.filteredNotes.findIndex(n => n.id === this.selectedNote.id)
-          if (filteredIndex !== -1) {
-            this.filteredNotes[filteredIndex].summary = response.data.summary
-            this.filteredNotes[filteredIndex].structuredData = response.data.structuredData
-            this.filteredNotes[filteredIndex].lastSummarizedAt = now
+          // Update the note in the notes array
+          const noteIndex = this.notes.findIndex(n => n.id === this.selectedNote.id)
+          if (noteIndex !== -1) {
+            this.notes[noteIndex].summary = response.data.summary
+            this.notes[noteIndex].structuredData = response.data.structuredData
+            this.notes[noteIndex].lastSummarizedAt = now
           }
-        }
 
-        // Don't need to switch view since we're already on summary tab
+          // Update in filtered notes if applicable
+          if (this.selectedCategory && this.filteredNotes.length > 0) {
+            const filteredIndex = this.filteredNotes.findIndex(n => n.id === this.selectedNote.id)
+            if (filteredIndex !== -1) {
+              this.filteredNotes[filteredIndex].summary = response.data.summary
+              this.filteredNotes[filteredIndex].structuredData = response.data.structuredData
+              this.filteredNotes[filteredIndex].lastSummarizedAt = now
+            }
+          }
 
+          // Don't need to switch view since we're already on summary tab
+        })
       } catch (error) {
-        console.error('Summarization error:', error)
         alert('Sorry, there was an error summarizing the note. Please try again.')
       } finally {
         this.summarizing = false

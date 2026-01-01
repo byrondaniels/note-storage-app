@@ -96,18 +96,25 @@
 import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
 import { API_URL } from '../utils/api'
 import CategoryBadge from './shared/CategoryBadge.vue'
+import { useApi } from '../composables/useApi'
 
 export default {
   name: 'QuestionAnswer',
   components: {
     CategoryBadge
   },
+  setup() {
+    const api = useApi()
+    return {
+      api,
+      loading: api.loading,
+      error: api.error
+    }
+  },
   data() {
     return {
       currentQuestion: '',
-      conversations: [],
-      loading: false,
-      error: null
+      conversations: []
     }
   },
   methods: {
@@ -115,13 +122,11 @@ export default {
     formatDate,
     getPreview,
     async askQuestion() {
-      if (!this.currentQuestion.trim() || this.loading) return
+      if (!this.currentQuestion.trim() || this.loading.value) return
 
-      this.loading = true
-      this.error = null
       const question = this.currentQuestion.trim()
 
-      try {
+      await this.api.request(async () => {
         const response = await fetch(`${API_URL}/ask`, {
           method: 'POST',
           headers: {
@@ -135,7 +140,7 @@ export default {
         }
 
         const data = await response.json()
-        
+
         // Add to conversation history
         this.conversations.unshift({
           question: data.question,
@@ -145,13 +150,7 @@ export default {
 
         // Clear input
         this.currentQuestion = ''
-
-      } catch (error) {
-        console.error('Error asking question:', error)
-        this.error = 'Failed to get an answer. Please try again.'
-      } finally {
-        this.loading = false
-      }
+      })
     }
   }
 }

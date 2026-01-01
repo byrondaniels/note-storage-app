@@ -111,12 +111,17 @@ import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
 import { API_URL } from '../utils/api'
 import BaseModal from './shared/BaseModal.vue'
 import CategoryBadge from './shared/CategoryBadge.vue'
+import { useApi } from '../composables/useApi'
 
 export default {
   name: 'SearchNotes',
   components: {
     BaseModal,
     CategoryBadge
+  },
+  setup() {
+    const api = useApi()
+    return { api }
   },
   data() {
     return {
@@ -137,11 +142,9 @@ export default {
     async performSearch() {
       if (!this.searchQuery.trim()) return
 
-      this.loading = true
-      this.error = ''
       this.lastSearchQuery = this.searchQuery
 
-      try {
+      await this.api.request(async () => {
         const response = await axios.post(`${API_URL}/search`, {
           query: this.searchQuery,
           limit: parseInt(this.searchLimit)
@@ -149,13 +152,7 @@ export default {
 
         this.searchResults = response.data || []
         this.hasSearched = true
-      } catch (error) {
-        this.error = 'Search failed. Please try again.'
-        console.error('Search error:', error)
-        this.searchResults = []
-      } finally {
-        this.loading = false
-      }
+      })
     },
 
     expandNote(note) {

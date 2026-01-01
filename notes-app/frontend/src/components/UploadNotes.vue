@@ -28,9 +28,14 @@
 <script>
 import axios from 'axios'
 import { API_URL } from '../utils/api'
+import { useApi } from '../composables/useApi'
 
 export default {
   name: 'UploadNotes',
+  setup() {
+    const api = useApi()
+    return { api }
+  },
   data() {
     return {
       note: {
@@ -45,19 +50,20 @@ export default {
     async submitNote() {
       this.loading = true
       this.message = ''
-      
+
       try {
-        const response = await axios.post(`${API_URL}/notes`, {
-          content: this.note.content
+        await this.api.request(async () => {
+          const response = await axios.post(`${API_URL}/notes`, {
+            content: this.note.content
+          })
+
+          this.message = `Note saved successfully with title: "${response.data.title}"`
+          this.messageType = 'success'
+          this.note.content = ''
         })
-        
-        this.message = `Note saved successfully with title: "${response.data.title}"`
-        this.messageType = 'success'
-        this.note.content = ''
       } catch (error) {
         this.message = 'Error saving note. Please try again.'
         this.messageType = 'error'
-        console.error('Error:', error)
       } finally {
         this.loading = false
       }

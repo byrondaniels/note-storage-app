@@ -386,6 +386,7 @@
 import axios from 'axios'
 import { API_URL } from '../utils/api'
 import BaseModal from './shared/BaseModal.vue'
+import { useApi } from '../composables/useApi'
 
 const EXTENSION_ID = 'koodfochknchgnegkcmcfcidkfgdfgkc'
 
@@ -400,6 +401,10 @@ export default {
   name: 'ChannelSettings',
   components: {
     BaseModal
+  },
+  setup() {
+    const api = useApi()
+    return { api }
   },
   data() {
     return {
@@ -515,48 +520,48 @@ export default {
     async loadData() {
       this.loading = true
       try {
-        // Load channels and settings in parallel
-        const [channelsRes, settingsRes] = await Promise.all([
-          axios.get(`${API_URL}/channels`),
-          axios.get(`${API_URL}/channel-settings`)
-        ])
+        await this.api.request(async () => {
+          // Load channels and settings in parallel
+          const [channelsRes, settingsRes] = await Promise.all([
+            axios.get(`${API_URL}/channels`),
+            axios.get(`${API_URL}/channel-settings`)
+          ])
 
-        this.channels = channelsRes.data || []
+          this.channels = channelsRes.data || []
 
-        // Index settings by channel name
-        const settings = settingsRes.data || []
-        this.channelSettings = {}
-        for (const s of settings) {
-          this.channelSettings[s.channelName] = s
-        }
-
-        // Initialize editing state for each channel
-        this.editingSettings = {}
-        for (const channel of this.channels) {
-          const existing = this.channelSettings[channel.name]
-          const hasCustomPrompt = existing?.promptText || existing?.promptSchema
-          this.editingSettings[channel.name] = {
-            // If channel has custom prompt, show as "custom", otherwise "default"
-            templateSource: hasCustomPrompt ? 'custom' : 'default',
-            promptText: existing?.promptText || '',
-            promptSchema: existing?.promptSchema || ''
+          // Index settings by channel name
+          const settings = settingsRes.data || []
+          this.channelSettings = {}
+          for (const s of settings) {
+            this.channelSettings[s.channelName] = s
           }
-          // Initialize sync video limit
-          this.syncVideoLimit[channel.name] = '20'
-        }
 
-        // Initialize editing state for templates
-        this.editingTemplates = {}
-        for (const s of settings) {
-          if (s.promptText || s.promptSchema) {
-            this.editingTemplates[s.channelName] = {
-              promptText: s.promptText || '',
-              promptSchema: s.promptSchema || ''
+          // Initialize editing state for each channel
+          this.editingSettings = {}
+          for (const channel of this.channels) {
+            const existing = this.channelSettings[channel.name]
+            const hasCustomPrompt = existing?.promptText || existing?.promptSchema
+            this.editingSettings[channel.name] = {
+              // If channel has custom prompt, show as "custom", otherwise "default"
+              templateSource: hasCustomPrompt ? 'custom' : 'default',
+              promptText: existing?.promptText || '',
+              promptSchema: existing?.promptSchema || ''
+            }
+            // Initialize sync video limit
+            this.syncVideoLimit[channel.name] = '20'
+          }
+
+          // Initialize editing state for templates
+          this.editingTemplates = {}
+          for (const s of settings) {
+            if (s.promptText || s.promptSchema) {
+              this.editingTemplates[s.channelName] = {
+                promptText: s.promptText || '',
+                promptSchema: s.promptSchema || ''
+              }
             }
           }
-        }
-      } catch (error) {
-        console.error('Failed to load channel data:', error)
+        })
       } finally {
         this.loading = false
       }
@@ -590,21 +595,22 @@ export default {
           }
         }
 
-        await axios.put(`${API_URL}/channel-settings/${encodeURIComponent(channelName)}`, {
-          platform: this.channelSettings[channelName]?.platform || 'youtube',
-          promptText: template.promptText,
-          promptSchema: template.promptSchema
-        })
+        await this.api.request(async () => {
+          await axios.put(`${API_URL}/channel-settings/${encodeURIComponent(channelName)}`, {
+            platform: this.channelSettings[channelName]?.platform || 'youtube',
+            promptText: template.promptText,
+            promptSchema: template.promptSchema
+          })
 
-        // Update local cache
-        this.channelSettings[channelName] = {
-          ...this.channelSettings[channelName],
-          channelName: channelName,
-          promptText: template.promptText,
-          promptSchema: template.promptSchema
-        }
+          // Update local cache
+          this.channelSettings[channelName] = {
+            ...this.channelSettings[channelName],
+            channelName: channelName,
+            promptText: template.promptText,
+            promptSchema: template.promptSchema
+          }
+        })
       } catch (error) {
-        console.error('Failed to save template:', error)
         alert('Failed to save template. Please try again.')
       } finally {
         this.savingTemplate = null
@@ -618,14 +624,15 @@ export default {
 
       this.deletingTemplate = channelName
       try {
-        await axios.delete(`${API_URL}/channel-settings/${encodeURIComponent(channelName)}`)
+        await this.api.request(async () => {
+          await axios.delete(`${API_URL}/channel-settings/${encodeURIComponent(channelName)}`)
 
-        // Remove from local cache
-        delete this.channelSettings[channelName]
-        delete this.editingTemplates[channelName]
-        this.expandedTemplate = null
+          // Remove from local cache
+          delete this.channelSettings[channelName]
+          delete this.editingTemplates[channelName]
+          this.expandedTemplate = null
+        })
       } catch (error) {
-        console.error('Failed to delete template:', error)
         alert('Failed to delete template. Please try again.')
       } finally {
         this.deletingTemplate = null
@@ -714,12 +721,13 @@ export default {
     async loadChannelNotes(channelName) {
       this.loadingNotes = channelName
       try {
-        const response = await axios.get(`${API_URL}/notes`, {
-          params: { channel: channelName }
+        await this.api.request(async () => {
+          const response = await axios.get(`${API_URL}/notes`, {
+            params: { channel: channelName }
+          })
+          this.channelNotes[channelName] = response.data || []
         })
-        this.channelNotes[channelName] = response.data || []
       } catch (error) {
-        console.error('Failed to load notes for channel:', error)
         this.channelNotes[channelName] = []
       } finally {
         this.loadingNotes = null
@@ -735,34 +743,35 @@ export default {
 
       this.refreshingSummary = channel.name
       try {
-        // Determine which prompt/schema to use based on template selection
-        const settings = this.editingSettings[channel.name]
-        let promptText = ''
-        let promptSchema = ''
+        await this.api.request(async () => {
+          // Determine which prompt/schema to use based on template selection
+          const settings = this.editingSettings[channel.name]
+          let promptText = ''
+          let promptSchema = ''
 
-        if (settings.templateSource === 'custom') {
-          promptText = settings.promptText
-          promptSchema = settings.promptSchema
-        } else if (settings.templateSource !== 'default') {
-          const sourceSettings = this.channelSettings[settings.templateSource]
-          if (sourceSettings) {
-            promptText = sourceSettings.promptText || ''
-            promptSchema = sourceSettings.promptSchema || ''
+          if (settings.templateSource === 'custom') {
+            promptText = settings.promptText
+            promptSchema = settings.promptSchema
+          } else if (settings.templateSource !== 'default') {
+            const sourceSettings = this.channelSettings[settings.templateSource]
+            if (sourceSettings) {
+              promptText = sourceSettings.promptText || ''
+              promptSchema = sourceSettings.promptSchema || ''
+            }
           }
-        }
-        // If default, both stay empty and backend uses defaults
+          // If default, both stay empty and backend uses defaults
 
-        await axios.post(`${API_URL}/summarize/${noteId}`, {
-          promptText: promptText,
-          promptSchema: promptSchema
+          await axios.post(`${API_URL}/summarize/${noteId}`, {
+            promptText: promptText,
+            promptSchema: promptSchema
+          })
+
+          // Reload notes to get updated summary
+          await this.loadChannelNotes(channel.name)
+
+          alert('Summary refreshed successfully!')
         })
-
-        // Reload notes to get updated summary
-        await this.loadChannelNotes(channel.name)
-
-        alert('Summary refreshed successfully!')
       } catch (error) {
-        console.error('Failed to refresh summary:', error)
         alert('Failed to refresh summary. Please try again.')
       } finally {
         this.refreshingSummary = null
@@ -802,30 +811,31 @@ export default {
           }
         }
 
-        await axios.put(`${API_URL}/channel-settings/${encodeURIComponent(channel.name)}`, {
-          platform: channel.platform,
-          channelUrl: this.channelSettings[channel.name]?.channelUrl || '',
-          promptText: promptTextToSave,
-          promptSchema: promptSchemaToSave
-        })
+        await this.api.request(async () => {
+          await axios.put(`${API_URL}/channel-settings/${encodeURIComponent(channel.name)}`, {
+            platform: channel.platform,
+            channelUrl: this.channelSettings[channel.name]?.channelUrl || '',
+            promptText: promptTextToSave,
+            promptSchema: promptSchemaToSave
+          })
 
-        // Update local cache (preserve existing channelUrl)
-        this.channelSettings[channel.name] = {
-          channelName: channel.name,
-          platform: channel.platform,
-          channelUrl: this.channelSettings[channel.name]?.channelUrl || '',
-          promptText: promptTextToSave,
-          promptSchema: promptSchemaToSave
-        }
-
-        this.savedChannel = channel.name
-        setTimeout(() => {
-          if (this.savedChannel === channel.name) {
-            this.savedChannel = null
+          // Update local cache (preserve existing channelUrl)
+          this.channelSettings[channel.name] = {
+            channelName: channel.name,
+            platform: channel.platform,
+            channelUrl: this.channelSettings[channel.name]?.channelUrl || '',
+            promptText: promptTextToSave,
+            promptSchema: promptSchemaToSave
           }
-        }, 2000)
+
+          this.savedChannel = channel.name
+          setTimeout(() => {
+            if (this.savedChannel === channel.name) {
+              this.savedChannel = null
+            }
+          }, 2000)
+        })
       } catch (error) {
-        console.error('Failed to save settings:', error)
         alert('Failed to save settings. Please try again.')
       } finally {
         this.saving = null
@@ -842,17 +852,18 @@ export default {
 
       this.deleting = true
       try {
-        await axios.delete(`${API_URL}/channels/${encodeURIComponent(this.channelToDelete.name)}/notes`)
+        await this.api.request(async () => {
+          await axios.delete(`${API_URL}/channels/${encodeURIComponent(this.channelToDelete.name)}/notes`)
 
-        // Remove channel from list
-        this.channels = this.channels.filter(c => c.name !== this.channelToDelete.name)
+          // Remove channel from list
+          this.channels = this.channels.filter(c => c.name !== this.channelToDelete.name)
 
-        // Close modal
-        this.showDeleteModal = false
-        this.channelToDelete = null
-        this.expandedChannel = null
+          // Close modal
+          this.showDeleteModal = false
+          this.channelToDelete = null
+          this.expandedChannel = null
+        })
       } catch (error) {
-        console.error('Failed to delete channel notes:', error)
         alert('Failed to delete notes. Please try again.')
       } finally {
         this.deleting = false
@@ -1029,15 +1040,17 @@ export default {
       // When we get the channel name and have pending prompt settings, save them (import only)
       if (!isSyncOperation && channelName && this.pendingImportPrompt && current === 1) {
         try {
-          await axios.put(`${API_URL}/channel-settings/${encodeURIComponent(channelName)}`, {
-            platform: 'youtube',
-            channelUrl: this.importChannelUrl.trim(),
-            promptText: this.pendingImportPrompt.promptText,
-            promptSchema: this.pendingImportPrompt.promptSchema
+          await this.api.request(async () => {
+            await axios.put(`${API_URL}/channel-settings/${encodeURIComponent(channelName)}`, {
+              platform: 'youtube',
+              channelUrl: this.importChannelUrl.trim(),
+              promptText: this.pendingImportPrompt.promptText,
+              promptSchema: this.pendingImportPrompt.promptSchema
+            })
+            console.log('Saved channel settings for:', channelName)
           })
-          console.log('Saved channel settings for:', channelName)
         } catch (err) {
-          console.error('Failed to save channel settings:', err)
+          // Silent fail, don't interrupt import
         }
         this.pendingImportPrompt = null
       }

@@ -59,11 +59,16 @@
 import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
 import { API_URL } from '../utils/api'
 import CategoryBadge from './shared/CategoryBadge.vue'
+import { useApi } from '../composables/useApi'
 
 export default {
   name: 'CategoryBrowser',
   components: {
     CategoryBadge
+  },
+  setup() {
+    const api = useApi()
+    return { api }
   },
   data() {
     return {
@@ -83,39 +88,37 @@ export default {
     formatDate,
     getPreview,
     async loadCategories() {
+      this.loading = true
       try {
-        this.loading = true
-        const response = await fetch(`${API_URL}/categories`)
-        if (!response.ok) throw new Error('Failed to fetch categories')
-        
-        this.categories = await response.json()
-        // Sort categories: ones with notes first, then alphabetically
-        this.categories.sort((a, b) => {
-          if (a.count !== b.count) {
-            return b.count - a.count // Higher count first
-          }
-          return a.name.localeCompare(b.name) // Alphabetical for same count
+        await this.api.request(async () => {
+          const response = await fetch(`${API_URL}/categories`)
+          if (!response.ok) throw new Error('Failed to fetch categories')
+
+          this.categories = await response.json()
+          // Sort categories: ones with notes first, then alphabetically
+          this.categories.sort((a, b) => {
+            if (a.count !== b.count) {
+              return b.count - a.count // Higher count first
+            }
+            return a.name.localeCompare(b.name) // Alphabetical for same count
+          })
         })
-      } catch (error) {
-        console.error('Error loading categories:', error)
-        this.error = 'Failed to load categories'
       } finally {
         this.loading = false
       }
     },
     
     async selectCategory(categoryName) {
-      try {
-        this.selectedCategory = categoryName
-        this.notesLoading = true
+      this.selectedCategory = categoryName
+      this.notesLoading = true
 
-        const response = await fetch(`${API_URL}/notes/category/${categoryName}`)
-        if (!response.ok) throw new Error('Failed to fetch notes')
-        
-        this.categoryNotes = await response.json()
-      } catch (error) {
-        console.error('Error loading category notes:', error)
-        this.error = 'Failed to load notes for this category'
+      try {
+        await this.api.request(async () => {
+          const response = await fetch(`${API_URL}/notes/category/${categoryName}`)
+          if (!response.ok) throw new Error('Failed to fetch notes')
+
+          this.categoryNotes = await response.json()
+        })
       } finally {
         this.notesLoading = false
       }
