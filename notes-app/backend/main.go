@@ -105,6 +105,7 @@ type ChannelSettings struct {
 	ID           primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	ChannelName  string             `json:"channelName" bson:"channel_name"`
 	Platform     string             `json:"platform" bson:"platform"`
+	ChannelUrl   string             `json:"channelUrl" bson:"channel_url"`     // YouTube channel URL for sync
 	PromptText   string             `json:"promptText" bson:"prompt_text"`     // Instructions for the AI
 	PromptSchema string             `json:"promptSchema" bson:"prompt_schema"` // Expected JSON output structure
 	UpdatedAt    time.Time          `json:"updatedAt" bson:"updated_at"`
@@ -618,6 +619,23 @@ func getNotes(c *gin.Context) {
 	c.JSON(http.StatusOK, notes)
 }
 
+// checkNoteExistsByURL checks if a note with the given URL already exists
+func checkNoteExistsByURL(url string) (bool, error) {
+	if url == "" {
+		return false, nil
+	}
+
+	count, err := notesCollection.CountDocuments(
+		context.Background(),
+		bson.M{"metadata.url": url},
+	)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
+
 type CreateNoteRequest struct {
 	Content  string                 `json:"content" binding:"required"`
 	Title    string                 `json:"title,omitempty"`    // Optional, will be auto-generated if empty
@@ -744,6 +762,18 @@ func createNote(c *gin.Context) {
 		SourcePublishedAt: sourcePublishedAt,
 		LastSummarizedAt:  lastSummarizedAt,
 		Metadata:          metadata,
+	}
+
+	// Check for duplicate URL before inserting
+	if urlVal, ok := metadata["url"].(string); ok && urlVal != "" {
+		exists, err := checkNoteExistsByURL(urlVal)
+		if err != nil {
+			log.Printf("Error checking for duplicate URL: %v", err)
+		} else if exists {
+			log.Printf("Duplicate note detected for URL: %s", urlVal)
+			c.JSON(http.StatusConflict, gin.H{"error": "duplicate", "url": urlVal})
+			return
+		}
 	}
 
 	result, err := notesCollection.InsertOne(context.TODO(), note)
@@ -1771,6 +1801,7 @@ func getChannelSettings(c *gin.Context) {
 		// Return default settings if not found
 		c.JSON(http.StatusOK, ChannelSettings{
 			ChannelName:  channelName,
+			ChannelUrl:   "",
 			PromptText:   "",
 			PromptSchema: "",
 		})
@@ -1790,6 +1821,7 @@ func updateChannelSettings(c *gin.Context) {
 
 	var req struct {
 		Platform     string `json:"platform"`
+		ChannelUrl   string `json:"channelUrl"`
 		PromptText   string `json:"promptText"`
 		PromptSchema string `json:"promptSchema"`
 	}
@@ -1811,6 +1843,7 @@ func updateChannelSettings(c *gin.Context) {
 	settings := ChannelSettings{
 		ChannelName:  channelName,
 		Platform:     req.Platform,
+		ChannelUrl:   req.ChannelUrl,
 		PromptText:   req.PromptText,
 		PromptSchema: req.PromptSchema,
 		UpdatedAt:    time.Now(),
