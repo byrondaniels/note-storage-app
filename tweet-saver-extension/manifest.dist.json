@@ -1,0 +1,72 @@
+{
+  "manifest_version": 3,
+  "name": "Social Media Note Saver",
+  "version": "1.0.2",
+  "description": "Save social media posts to your notes API with one click",
+
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+
+  "externally_connectable": {
+    "matches": [
+      "http://localhost:*/*",
+      "http://127.0.0.1:*/*"
+    ]
+  },
+
+  "host_permissions": [
+    "https://twitter.com/*",
+    "https://x.com/*",
+    "https://linkedin.com/*",
+    "https://www.linkedin.com/*",
+    "https://youtube.com/*",
+    "https://www.youtube.com/*",
+    "http://localhost:*/*",
+    "https://*/*"
+  ],
+
+  "content_scripts": [
+    {
+      "matches": [
+        "https://twitter.com/*",
+        "https://x.com/*",
+        "https://linkedin.com/*",
+        "https://www.linkedin.com/*",
+        "https://youtube.com/*",
+        "https://www.youtube.com/*"
+      ],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_end"
+    },
+    {
+      "matches": [
+        "http://localhost:*/*",
+        "http://127.0.0.1:*/*"
+      ],
+      "js": ["localhost-bridge.js"],
+      "run_at": "document_end"
+    }
+  ],
+
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Social Media Note Saver Settings"
+  },
+
+  "options_page": "options.html",
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
