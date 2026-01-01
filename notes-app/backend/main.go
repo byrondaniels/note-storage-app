@@ -1941,12 +1941,6 @@ func deleteChannelNotes(c *gin.Context) {
 		}
 	}
 
-	// Also delete channel settings
-	channelSettingsCollection.DeleteOne(
-		context.Background(),
-		bson.M{"channel_name": channelName},
-	)
-
 	log.Printf("Deleted %d notes and %d chunks for channel: %s", deletedNotes, deletedChunks, channelName)
 
 	c.JSON(http.StatusOK, gin.H{

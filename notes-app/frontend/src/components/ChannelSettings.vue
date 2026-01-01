@@ -291,15 +291,12 @@
               Extension required for syncing.
             </div>
 
+            <div v-else-if="!channelSettings[channel.name]?.channelUrl" class="no-url-message">
+              No channel URL saved. Re-import this channel to enable syncing.
+            </div>
+
             <div v-else class="sync-controls">
               <div class="sync-row">
-                <input
-                  type="text"
-                  v-model="editingSettings[channel.name].channelUrl"
-                  placeholder="https://www.youtube.com/@channelname"
-                  :disabled="syncing === channel.name"
-                  class="channel-url-input"
-                />
                 <select
                   v-model="syncVideoLimit[channel.name]"
                   :disabled="syncing === channel.name"
@@ -312,10 +309,10 @@
                 </select>
                 <button
                   @click="startSync(channel)"
-                  :disabled="syncing === channel.name || !editingSettings[channel.name].channelUrl"
+                  :disabled="syncing === channel.name"
                   class="sync-btn"
                 >
-                  {{ syncing === channel.name ? 'Syncing...' : 'Sync' }}
+                  {{ syncing === channel.name ? 'Syncing...' : 'Sync New Videos' }}
                 </button>
               </div>
 
@@ -454,10 +451,21 @@ export default {
       return Object.values(this.channelSettings).filter(s => s && (s.promptText || s.promptSchema))
     },
     channelsWithCustomPrompts() {
-      return this.channels.filter(ch => {
+      // Get channels that have notes and custom prompts
+      const channelsWithNotes = this.channels.filter(ch => {
         const settings = this.channelSettings[ch.name]
         return settings && (settings.promptText || settings.promptSchema)
       })
+
+      // Get channel names that have notes
+      const channelNamesWithNotes = new Set(this.channels.map(ch => ch.name))
+
+      // Get saved templates that don't have notes (channel notes were deleted)
+      const orphanedTemplates = Object.values(this.channelSettings)
+        .filter(s => s && (s.promptText || s.promptSchema) && !channelNamesWithNotes.has(s.channelName))
+        .map(s => ({ name: s.channelName, platform: s.platform || 'youtube' }))
+
+      return [...channelsWithNotes, ...orphanedTemplates]
     },
     importProgressPercentage() {
       if (this.importProgress.total === 0) return 0
@@ -523,7 +531,6 @@ export default {
           this.editingSettings[channel.name] = {
             // If channel has custom prompt, show as "custom", otherwise "default"
             templateSource: hasCustomPrompt ? 'custom' : 'default',
-            channelUrl: existing?.channelUrl || '',
             promptText: existing?.promptText || '',
             promptSchema: existing?.promptSchema || ''
           }
@@ -790,16 +797,16 @@ export default {
 
         await axios.put(`${API_URL}/channel-settings/${encodeURIComponent(channel.name)}`, {
           platform: channel.platform,
-          channelUrl: settings.channelUrl || '',
+          channelUrl: this.channelSettings[channel.name]?.channelUrl || '',
           promptText: promptTextToSave,
           promptSchema: promptSchemaToSave
         })
 
-        // Update local cache
+        // Update local cache (preserve existing channelUrl)
         this.channelSettings[channel.name] = {
           channelName: channel.name,
           platform: channel.platform,
-          channelUrl: settings.channelUrl || '',
+          channelUrl: this.channelSettings[channel.name]?.channelUrl || '',
           promptText: promptTextToSave,
           promptSchema: promptSchemaToSave
         }
@@ -964,40 +971,11 @@ export default {
     },
 
     async startSync(channel) {
-      const settings = this.editingSettings[channel.name]
-      const url = settings.channelUrl?.trim()
+      const url = this.channelSettings[channel.name]?.channelUrl
 
       if (!url) {
-        alert('Please enter a YouTube channel URL')
+        alert('No channel URL saved. Please re-import this channel.')
         return
-      }
-
-      // Validate URL
-      try {
-        const parsed = new URL(url)
-        if (!parsed.hostname.includes('youtube.com')) {
-          alert('Please enter a valid YouTube channel URL')
-          return
-        }
-      } catch {
-        alert('Please enter a valid YouTube channel URL')
-        return
-      }
-
-      // Save the channel URL for future syncs
-      try {
-        await axios.put(`${API_URL}/channel-settings/${encodeURIComponent(channel.name)}`, {
-          platform: channel.platform,
-          channelUrl: url,
-          promptText: this.channelSettings[channel.name]?.promptText || '',
-          promptSchema: this.channelSettings[channel.name]?.promptSchema || ''
-        })
-        this.channelSettings[channel.name] = {
-          ...this.channelSettings[channel.name],
-          channelUrl: url
-        }
-      } catch (err) {
-        console.error('Failed to save channel URL:', err)
       }
 
       this.syncing = channel.name
@@ -1046,6 +1024,7 @@ export default {
         try {
           await axios.put(`${API_URL}/channel-settings/${encodeURIComponent(channelName)}`, {
             platform: 'youtube',
+            channelUrl: this.importChannelUrl.trim(),
             promptText: this.pendingImportPrompt.promptText,
             promptSchema: this.pendingImportPrompt.promptSchema
           })
@@ -1726,6 +1705,12 @@ textarea:focus {
   font-size: 13px;
 }
 
+.no-url-message {
+  color: #666;
+  font-size: 13px;
+  font-style: italic;
+}
+
 .sync-controls {
   display: flex;
   flex-direction: column;
@@ -1736,19 +1721,6 @@ textarea:focus {
   display: flex;
   gap: 8px;
   align-items: center;
-}
-
-.channel-url-input {
-  flex: 1;
-  padding: 10px 12px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 14px;
-}
-
-.channel-url-input:focus {
-  outline: none;
-  border-color: #007AFF;
 }
 
 .sync-limit-select {
