@@ -37,7 +37,7 @@
         "https://youtube.com/*",
         "https://www.youtube.com/*"
       ],
-      "js": ["utils/config.js", "content.js"],
+      "js": ["utils/config.js", "constants/selectors.js", "constants/config.js", "content.js"],
       "css": ["styles.css"],
       "run_at": "document_end"
     },

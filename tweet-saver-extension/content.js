@@ -1,7 +1,10 @@
 // Social Media Note Saver - Content Script
 // Runs on supported social media platforms to inject save buttons
 
-// DEFAULT_CONFIG and StorageService are loaded from utils/config.js via manifest
+// Utilities and constants are loaded via manifest:
+// - DEFAULT_CONFIG, StorageService from utils/config.js
+// - TWITTER_SELECTORS, LINKEDIN_SELECTORS, YOUTUBE_SELECTORS, MUTATION_SELECTORS from constants/selectors.js
+// - PLATFORMS, BUTTON_CONFIG, TIMING, CONTENT_LIMITS, PATTERNS from constants/config.js
 
 // Storage helpers for tracking imported videos
 async function isVideoImported(videoId) {
@@ -165,7 +168,7 @@ class SocialMediaSaver {
       console.log('Social Media Note Saver: YouTube URL changed, clearing processed posts');
       this.processedPosts.clear();
       // Remove existing buttons
-      const existingButtons = document.querySelectorAll('.social-save-btn[data-platform="youtube"]');
+      const existingButtons = document.querySelectorAll(YOUTUBE_SELECTORS.saveButtons);
       existingButtons.forEach(button => button.remove());
       this.currentUrl = window.location.href;
     }
@@ -192,15 +195,8 @@ class SocialMediaSaver {
 
   findTwitterPosts() {
     // Twitter/X uses various selectors depending on the page structure
-    const selectors = [
-      '[data-testid="tweet"]',
-      'article[role="article"]',
-      '[data-testid="tweetText"]',
-      '.tweet'
-    ];
-    
     let posts = [];
-    for (const selector of selectors) {
+    for (const selector of TWITTER_SELECTORS.posts) {
       const elements = document.querySelectorAll(selector);
       if (elements.length > 0) {
         posts = Array.from(elements);
@@ -260,31 +256,16 @@ class SocialMediaSaver {
 
   hasLinkedInContent(postElement) {
     // Quick sync check for content presence (without expanding)
-    const contentSelectors = [
-      '[data-view-name="feed-commentary"] span[tabindex="-1"]',
-      '[data-testid="expandable-text-box"]',
-      '.feed-shared-update-v2__description .break-words',
-      '.feed-shared-text',
-      '.feed-shared-inline-show-more-text',
-      '.attributed-text-segment-list__content',
-      '[data-test-id="main-feed-activity-card"] .break-words',
-      '.feed-shared-update-v2__commentary .break-words',
-      '.break-words',
-      '[dir="ltr"]',
-      'span[lang]',
-      'div[lang]'
-    ];
-    
-    for (const selector of contentSelectors) {
+    for (const selector of LINKEDIN_SELECTORS.content) {
       const contentElement = postElement.querySelector(selector);
       if (contentElement && contentElement.textContent.trim()) {
         const text = contentElement.textContent.trim();
-        if (text.length > 20 && !text.match(/^\d+\s*(hour|day|week|month)s?\s*ago$/i)) {
+        if (text.length > 20 && !text.match(PATTERNS.timeAgo)) {
           return true;
         }
       }
     }
-    
+
     return false;
   }
 
@@ -363,24 +344,10 @@ class SocialMediaSaver {
   // LinkedIn-specific implementations
   findLinkedInPosts() {
     console.log('Social Media Note Saver: Looking for LinkedIn posts...');
-    
+
     // Try specific selectors first - updated for current LinkedIn interface
-    const specificSelectors = [
-      '[role="listitem"][componentkey*="urn:li:activity"]',
-      '[role="listitem"][componentkey*="FeedType_MAIN_FEED"]',
-      '[data-view-name="feed-full-update"]',
-      '.feed-shared-update-v2',
-      '[data-id*="urn:li:activity"]',
-      '.occludable-update',
-      'article',
-      '.artdeco-card',
-      '[data-urn]',
-      '[data-entity-urn]',
-      '[data-view-name]'
-    ];
-    
     let posts = [];
-    for (const selector of specificSelectors) {
+    for (const selector of LINKEDIN_SELECTORS.posts) {
       const elements = document.querySelectorAll(selector);
       console.log(`Social Media Note Saver: Selector "${selector}" found ${elements.length} elements`);
       if (elements.length > 0) {
@@ -534,28 +501,12 @@ class SocialMediaSaver {
     await this.expandLinkedInContent(postElement);
     
     // Try different selectors for LinkedIn post content - updated for current interface
-    const contentSelectors = [
-      '[data-view-name="feed-commentary"] span[tabindex="-1"]',
-      '[data-testid="expandable-text-box"]',
-      '.feed-shared-update-v2__description .break-words',
-      '.feed-shared-text',
-      '.feed-shared-inline-show-more-text',
-      '.attributed-text-segment-list__content',
-      '[data-test-id="main-feed-activity-card"] .break-words',
-      '.feed-shared-update-v2__commentary .break-words',
-      // More generic selectors for content
-      '.break-words',
-      '[dir="ltr"]',
-      'span[lang]',
-      'div[lang]'
-    ];
-    
-    for (const selector of contentSelectors) {
+    for (const selector of LINKEDIN_SELECTORS.content) {
       const contentElement = postElement.querySelector(selector);
       if (contentElement && contentElement.textContent.trim()) {
         const text = contentElement.textContent.trim();
         // Make sure it's substantial content (not just metadata)
-        if (text.length > 20 && !text.match(/^\d+\s*(hour|day|week|month)s?\s*ago$/i)) {
+        if (text.length > 20 && !text.match(PATTERNS.timeAgo)) {
           return text;
         }
       }
@@ -567,8 +518,8 @@ class SocialMediaSaver {
       const text = element.textContent.trim();
       if (text.length > 30 && text.length < 3000) {
         // Skip if it's just timestamp or engagement metrics
-        if (!text.match(/^\d+\s*(hour|day|week|month)s?\s*ago$/i) &&
-            !text.match(/^\d+\s*(reaction|like|comment|share)s?$/i) &&
+        if (!text.match(PATTERNS.timeAgo) &&
+            !text.match(PATTERNS.engagement) &&
             !text.includes('•') && 
             text.split(' ').length > 5) {
           return text;
@@ -581,17 +532,7 @@ class SocialMediaSaver {
 
   async expandLinkedInContent(postElement) {
     // Look for "Show more" or "see more" buttons in LinkedIn posts
-    const showMoreSelectors = [
-      '[aria-label*="see more"]',
-      '[aria-label*="Show more"]', 
-      'button[aria-expanded="false"]',
-      '.feed-shared-inline-show-more-text__see-more-less-toggle',
-      '.feed-shared-text__see-more',
-      'button',
-      'span'
-    ];
-
-    for (const selector of showMoreSelectors) {
+    for (const selector of LINKEDIN_SELECTORS.expandButtons) {
       const elements = postElement.querySelectorAll(selector);
       for (const element of elements) {
         const text = element.textContent.toLowerCase();
@@ -611,7 +552,7 @@ class SocialMediaSaver {
     }
 
     // Also try to find and click any expandable text elements
-    const expandableElements = postElement.querySelectorAll('[data-testid="expandable-text-box"]');
+    const expandableElements = postElement.querySelectorAll(LINKEDIN_SELECTORS.expandable);
     for (const element of expandableElements) {
       if (element.textContent.includes('…') || element.textContent.includes('...')) {
         try {
@@ -652,17 +593,7 @@ class SocialMediaSaver {
 
   getLinkedInAuthor(postElement) {
     // Try different selectors for LinkedIn author - updated for current interface
-    const authorSelectors = [
-      'a[href*="/in/"] strong',
-      '[data-view-name="feed-header-text"] strong',
-      '.feed-shared-actor__name',
-      '.update-components-actor__name',
-      '.feed-shared-actor__title',
-      '[data-control-name="actor_name"]',
-      '.feed-shared-update-v2__actor-name'
-    ];
-    
-    for (const selector of authorSelectors) {
+    for (const selector of LINKEDIN_SELECTORS.author) {
       const authorElement = postElement.querySelector(selector);
       if (authorElement) {
         const text = authorElement.textContent.trim();
@@ -682,20 +613,12 @@ class SocialMediaSaver {
 
   getLinkedInHandle(postElement) {
     // LinkedIn uses profile URLs instead of handles - updated selectors
-    const profileSelectors = [
-      '[data-view-name="feed-header-text"] a[href*="/in/"]',
-      '[data-view-name="feed-actor-image"] a[href*="/in/"]',
-      'a[href*="/in/"]',
-      '.feed-shared-actor__meta a',
-      '.update-components-actor__meta a'
-    ];
-    
-    for (const selector of profileSelectors) {
+    for (const selector of LINKEDIN_SELECTORS.profile) {
       const linkElement = postElement.querySelector(selector);
       if (linkElement) {
         const href = linkElement.getAttribute('href');
         if (href && href.includes('/in/')) {
-          const match = href.match(/\/in\/([^\/\?]+)/);
+          const match = href.match(PATTERNS.linkedInProfile);
           if (match) return `/in/${match[1]}`;
         }
       }
@@ -706,13 +629,7 @@ class SocialMediaSaver {
 
   getLinkedInUrl(postElement) {
     // Try to find post permalink
-    const permalinkSelectors = [
-      'a[href*="/posts/"]',
-      '[data-control-name="overlay"] a',
-      '.feed-shared-control-menu__trigger'
-    ];
-    
-    for (const selector of permalinkSelectors) {
+    for (const selector of LINKEDIN_SELECTORS.permalink) {
       const linkElement = postElement.querySelector(selector);
       if (linkElement) {
         const href = linkElement.getAttribute('href');
@@ -730,18 +647,11 @@ class SocialMediaSaver {
 
   getLinkedInTimestamp(postElement) {
     // Try to find timestamp - updated for current interface
-    const timeSelectors = [
-      'time',
-      '[data-live-timestamp]',
-      '.feed-shared-actor__sub-description time',
-      '.update-components-actor__sub-description time'
-    ];
-    
     // Also look for relative timestamps in text (e.g., "4d •")
-    const relativeTimeElements = postElement.querySelectorAll('p');
+    const relativeTimeElements = postElement.querySelectorAll(LINKEDIN_SELECTORS.relativeTime);
     for (const element of relativeTimeElements) {
       const text = element.textContent.trim();
-      const timeMatch = text.match(/^(\d+[dhwmy])\s*•/);
+      const timeMatch = text.match(PATTERNS.relativeTime);
       if (timeMatch) {
         // Convert relative time to approximate timestamp
         const value = parseInt(timeMatch[1]);
@@ -760,8 +670,8 @@ class SocialMediaSaver {
         return estimatedTime.toISOString();
       }
     }
-    
-    for (const selector of timeSelectors) {
+
+    for (const selector of LINKEDIN_SELECTORS.timestamp) {
       const timeElement = postElement.querySelector(selector);
       if (timeElement) {
         const datetime = timeElement.getAttribute('datetime') || 
@@ -777,15 +687,8 @@ class SocialMediaSaver {
 
   getLinkedInShareInfo(postElement) {
     // Check if this is a shared/reposted content - updated for current interface
-    const shareIndicators = [
-      '[data-view-name="feed-header-text"]',
-      '.feed-shared-header__text-info',
-      '.update-components-header__text-view',
-      '[data-control-name="reshare_context"]'
-    ];
-    
     // Check for "celebrates this" pattern in header
-    const headerElement = postElement.querySelector('[data-view-name="feed-header-text"]');
+    const headerElement = postElement.querySelector(LINKEDIN_SELECTORS.shareIndicators[0]);
     if (headerElement) {
       const text = headerElement.textContent.trim();
       if (text.includes('celebrates this')) {
@@ -799,8 +702,8 @@ class SocialMediaSaver {
         }
       }
     }
-    
-    for (const selector of shareIndicators) {
+
+    for (const selector of LINKEDIN_SELECTORS.shareIndicators) {
       const element = postElement.querySelector(selector);
       if (element) {
         const text = element.textContent.trim();
@@ -840,9 +743,9 @@ class SocialMediaSaver {
   getLinkedInMetrics(postElement) {
     // Get engagement metrics if visible - updated for current interface
     const metrics = {};
-    
+
     // Look for reaction count in the new interface
-    const reactionCount = postElement.querySelector('[data-view-name="feed-reaction-count"] p');
+    const reactionCount = postElement.querySelector(LINKEDIN_SELECTORS.metrics.reactions);
     if (reactionCount) {
       const text = reactionCount.textContent.trim();
       const match = text.match(/(\d+)/);
@@ -852,7 +755,7 @@ class SocialMediaSaver {
     }
     
     // Look for repost count
-    const repostCount = postElement.querySelector('[data-view-name="feed-repost-count"] p');
+    const repostCount = postElement.querySelector(LINKEDIN_SELECTORS.metrics.reposts);
     if (repostCount) {
       const text = repostCount.textContent.trim();
       const match = text.match(/(\d+)/);
@@ -860,18 +763,18 @@ class SocialMediaSaver {
         metrics.reposts = match[1];
       }
     }
-    
+
     // Try legacy selectors as fallback
-    const socialCounts = postElement.querySelector('.social-counts-reactions');
+    const socialCounts = postElement.querySelector(LINKEDIN_SELECTORS.metrics.socialCounts);
     if (socialCounts) {
       const reactionsText = socialCounts.textContent.trim();
       if (reactionsText) {
         metrics.reactions = reactionsText;
       }
     }
-    
+
     // Try to get comment count
-    const commentButton = postElement.querySelector('[data-control-name="comment"]');
+    const commentButton = postElement.querySelector(LINKEDIN_SELECTORS.metrics.commentButton);
     if (commentButton) {
       const commentText = commentButton.textContent.trim();
       const match = commentText.match(/(\d+)/);
@@ -879,9 +782,9 @@ class SocialMediaSaver {
         metrics.comments = match[1];
       }
     }
-    
+
     // Try to get share count
-    const shareButton = postElement.querySelector('[data-control-name="share"]');
+    const shareButton = postElement.querySelector(LINKEDIN_SELECTORS.metrics.shareButton);
     if (shareButton) {
       const shareText = shareButton.textContent.trim();
       const match = shareText.match(/(\d+)/);
@@ -904,14 +807,14 @@ class SocialMediaSaver {
     }
     
     // Look for the main video player
-    const videoElement = document.querySelector('#movie_player, #player, .html5-video-player');
+    const videoElement = document.querySelector(YOUTUBE_SELECTORS.player.join(', '));
     if (!videoElement) {
       console.log('Social Media Note Saver: No video player found');
       return [];
     }
-    
+
     // Return the video container for button placement
-    const videoContainer = document.querySelector('#primary, #watch7-content, #content');
+    const videoContainer = document.querySelector(YOUTUBE_SELECTORS.container.join(', '));
     return videoContainer ? [videoContainer] : [];
   }
 
@@ -949,17 +852,7 @@ class SocialMediaSaver {
 
   async findAndClickTranscriptButton() {
     // Look for transcript button in various locations
-    const transcriptSelectors = [
-      'button[aria-label*="transcript" i]',
-      'button[aria-label*="Show transcript" i]',
-      'yt-button-renderer:has([aria-label*="transcript" i])',
-      '[role="button"]:has-text("Show transcript")',
-      'ytd-engagement-panel-title-header-renderer:has-text("Transcript")',
-      '#description button:has-text("Show transcript")',
-      'button:has-text("Show transcript")'
-    ];
-
-    for (const selector of transcriptSelectors) {
+    for (const selector of YOUTUBE_SELECTORS.transcript.buttons) {
       try {
         // Handle special :has-text selector
         if (selector.includes(':has-text')) {
@@ -986,14 +879,14 @@ class SocialMediaSaver {
     }
 
     // Try looking in description expand area
-    const showMoreButton = document.querySelector('#description button[aria-label*="more" i], #expand');
+    const showMoreButton = document.querySelector(YOUTUBE_SELECTORS.transcript.expandDescription.join(', '));
     if (showMoreButton) {
       console.log('Social Media Note Saver: Expanding description to look for transcript');
       showMoreButton.click();
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, TIMING.descriptionExpandWait));
 
       // Try transcript selectors again
-      for (const selector of transcriptSelectors) {
+      for (const selector of YOUTUBE_SELECTORS.transcript.buttons) {
         const button = document.querySelector(selector);
         if (button) {
           console.log('Social Media Note Saver: Found transcript button after expanding description');
@@ -1276,14 +1169,7 @@ class SocialMediaSaver {
 
   getTwitterContent(tweetElement) {
     // Try different selectors for tweet text
-    const textSelectors = [
-      '[data-testid="tweetText"]',
-      '.tweet-text',
-      '.TweetTextSize',
-      '[lang]'
-    ];
-    
-    for (const selector of textSelectors) {
+    for (const selector of TWITTER_SELECTORS.content) {
       const textElement = tweetElement.querySelector(selector);
       if (textElement && textElement.textContent.trim()) {
         return textElement.textContent.trim();
@@ -1295,15 +1181,7 @@ class SocialMediaSaver {
 
   getTwitterAuthor(tweetElement) {
     // Try different selectors for author
-    const authorSelectors = [
-      '[data-testid="User-Name"] [dir="ltr"]',
-      '[data-testid="User-Name"]',
-      '.username',
-      '.u-linkComplex-target',
-      'a[role="link"][href^="/"]'
-    ];
-    
-    for (const selector of authorSelectors) {
+    for (const selector of TWITTER_SELECTORS.author) {
       const authorElement = tweetElement.querySelector(selector);
       if (authorElement) {
         const text = authorElement.textContent.trim();
@@ -1314,10 +1192,10 @@ class SocialMediaSaver {
     }
     
     // Fallback: try to get from URL
-    const link = tweetElement.querySelector('a[href*="/status/"]');
+    const link = tweetElement.querySelector(TWITTER_SELECTORS.link);
     if (link) {
       const href = link.getAttribute('href');
-      const match = href.match(/\/([^\/]+)\/status/);
+      const match = href.match(PATTERNS.twitterHandle);
       if (match) return match[1];
     }
     
@@ -1326,12 +1204,7 @@ class SocialMediaSaver {
 
   getTwitterHandle(tweetElement) {
     // Get the @handle
-    const handleSelectors = [
-      '[data-testid="User-Name"] [dir="ltr"]:nth-child(2)',
-      '[data-testid="User-Name"] span'
-    ];
-    
-    for (const selector of handleSelectors) {
+    for (const selector of TWITTER_SELECTORS.handle) {
       const elements = tweetElement.querySelectorAll(selector);
       for (const element of elements) {
         const text = element.textContent.trim();
@@ -1350,26 +1223,20 @@ class SocialMediaSaver {
       }
     }
     
-    // Fallback: try to get from URL  
-    const link = tweetElement.querySelector('a[href*="/status/"]');
+    // Fallback: try to get from URL
+    const link = tweetElement.querySelector(TWITTER_SELECTORS.link);
     if (link) {
       const href = link.getAttribute('href');
-      const match = href.match(/\/([^\/]+)\/status/);
+      const match = href.match(PATTERNS.twitterHandle);
       if (match) return '@' + match[1];
     }
-    
+
     return '@unknown';
   }
 
   getTwitterRetweetInfo(tweetElement) {
     // Check if this is a retweet
-    const retweetIndicators = [
-      '[data-testid="socialContext"]',
-      '[aria-label*="retweeted"]',
-      'span'
-    ];
-    
-    for (const selector of retweetIndicators) {
+    for (const selector of TWITTER_SELECTORS.retweetIndicators) {
       const elements = tweetElement.querySelectorAll(selector);
       for (const element of elements) {
         const text = element.textContent.trim();
@@ -1478,7 +1345,7 @@ class SocialMediaSaver {
     
     // For YouTube, check for existing buttons more broadly since the postElement might be the entire page
     if (this.platform === 'youtube') {
-      const existingButtons = document.querySelectorAll('.social-save-btn[data-platform="youtube"]');
+      const existingButtons = document.querySelectorAll(YOUTUBE_SELECTORS.saveButtons);
       if (existingButtons.length > 0) {
         console.log('Social Media Note Saver: YouTube save button already exists, skipping');
         this.processedPosts.add(postId);
