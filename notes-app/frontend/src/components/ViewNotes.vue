@@ -256,7 +256,13 @@
           <!-- Content based on current view -->
           <div class="note-detail-content">
             <div v-if="currentView === 'full'" class="full-content">
-              {{ selectedNote.content }}
+              <div class="content-header">
+                <button @click="copyToClipboard(selectedNote.content, 'full')" class="copy-btn" :class="{ 'copied': copiedState === 'full' }">
+                  <span v-if="copiedState === 'full'">Copied!</span>
+                  <span v-else>📋 Copy</span>
+                </button>
+              </div>
+              <div class="content-text">{{ selectedNote.content }}</div>
             </div>
             <div v-else-if="currentView === 'summary'" class="summary-content">
               <div v-if="summarizing" class="summary-loading">
@@ -264,7 +270,13 @@
                 <p>Generating summary...</p>
               </div>
               <div v-else-if="selectedNote.summary" class="summary-text">
-                {{ selectedNote.summary }}
+                <div class="content-header">
+                  <button @click="copyToClipboard(selectedNote.summary, 'summary')" class="copy-btn" :class="{ 'copied': copiedState === 'summary' }">
+                    <span v-if="copiedState === 'summary'">Copied!</span>
+                    <span v-else>📋 Copy</span>
+                  </button>
+                </div>
+                <div class="content-text">{{ selectedNote.summary }}</div>
               </div>
               <div v-else class="no-summary-message">
                 <p>No summary available yet. Click the Summary tab to generate one.</p>
@@ -459,7 +471,9 @@ export default {
       currentView: 'summary', // 'full' or 'summary' - default to summary
       // Grouping functionality
       groupByChannel: true, // Always group by channel
-      expandedChannels: {} // Track which channels are expanded
+      expandedChannels: {}, // Track which channels are expanded
+      // Copy functionality
+      copiedState: null // Track which content was just copied ('full' or 'summary')
     }
   },
   computed: {
@@ -1140,6 +1154,34 @@ export default {
     },
     isArrayOfObjects(value) {
       return Array.isArray(value) && value.length > 0 && typeof value[0] === 'object' && value[0] !== null
+    },
+    // Copy to clipboard functionality
+    async copyToClipboard(text, type) {
+      if (!text) return
+
+      try {
+        await navigator.clipboard.writeText(text)
+        this.copiedState = type
+
+        // Reset copied state after 2 seconds
+        setTimeout(() => {
+          this.copiedState = null
+        }, 2000)
+      } catch (error) {
+        console.error('Failed to copy:', error)
+        // Fallback for older browsers
+        const textarea = document.createElement('textarea')
+        textarea.value = text
+        document.body.appendChild(textarea)
+        textarea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textarea)
+
+        this.copiedState = type
+        setTimeout(() => {
+          this.copiedState = null
+        }, 2000)
+      }
     }
   }
 }
@@ -2519,6 +2561,44 @@ export default {
 }
 
 /* Content Styles */
+.content-header {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.copy-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: #f8f9fa;
+  border: 1px solid #d1d1d6;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #495057;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.copy-btn:hover {
+  background: #e9ecef;
+  border-color: #007AFF;
+  color: #007AFF;
+}
+
+.copy-btn.copied {
+  background: #d4edda;
+  border-color: #28a745;
+  color: #28a745;
+}
+
+.content-text {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
 .full-content,
 .summary-text {
   white-space: pre-wrap;

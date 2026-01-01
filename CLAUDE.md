@@ -62,9 +62,10 @@ docker-compose up --build
              │ (port     │           │  (6333/    │      │ - Embeddings│
              │  27017)   │           │   6334)    │      │ - Generation│
              │           │           │            │      │ - Classify  │
-             │ - notes   │           │ - vectors  │      └────────────┘
-             │ - chunks  │           │ - 768 dim  │
-             │ - channel_│           └────────────┘
+             │ db:notesdb│           │ - vectors  │      └────────────┘
+             │ - notes   │           │ - 768 dim  │
+             │ - chunks  │           └────────────┘
+             │ - channel_│
              │   settings│
              └───────────┘
 ```
@@ -147,6 +148,11 @@ note-storage-app/
 - `notes-app/docker-compose.yml` - All service definitions
 - `notes-app/.env.example` - Required: GEMINI_API_KEY
 - `tweet-saver-extension/manifest.json` - Extension permissions/config
+
+**Database Configuration:**
+- MongoDB URI: `mongodb://mongo:27017` (or `mongodb://localhost:27017` from host)
+- Database name: `notesdb`
+- Collections: `notes`, `chunks`, `channel_settings`
 
 **Central/Frequently Modified:**
 - `notes-app/backend/main.go` - All backend logic in single file (1800+ lines)

@@ -648,10 +648,31 @@ func createNote(c *gin.Context) {
 		}
 	}
 
+	// Check for custom prompt settings based on author/channel
+	var customPromptText, customPromptSchema string
+	if author, ok := metadata["author"].(string); ok && author != "" {
+		var settings ChannelSettings
+		err := channelSettingsCollection.FindOne(
+			context.Background(),
+			bson.M{"channel_name": author},
+		).Decode(&settings)
+
+		if err == nil && (settings.PromptText != "" || settings.PromptSchema != "") {
+			customPromptText = settings.PromptText
+			customPromptSchema = settings.PromptSchema
+			log.Printf("Found custom prompt for channel '%s' during note creation", author)
+		}
+	}
+
 	// Use combined analysis if title not provided (single API call for title + category + optional summary)
 	var title, category, summary string
+	var structuredData map[string]interface{}
+
 	if req.Title == "" {
-		analysis, err := analyzeNote(req.Content, isYouTube)
+		// Always get title and category from analyzeNote
+		// Only get summary from analyzeNote if no custom prompt exists
+		useDefaultSummary := customPromptText == "" && customPromptSchema == ""
+		analysis, err := analyzeNote(req.Content, isYouTube && useDefaultSummary)
 		if err != nil {
 			log.Printf("Failed to analyze note: %v", err)
 			title = "Untitled Note"
@@ -659,29 +680,49 @@ func createNote(c *gin.Context) {
 		} else {
 			title = analysis.Title
 			category = analysis.Category
-			summary = analysis.Summary
+			if useDefaultSummary {
+				summary = analysis.Summary
+			}
 			log.Printf("Note analyzed - Title: %s, Category: %s, Summary length: %d", title, category, len(summary))
 		}
 	} else {
 		title = req.Title
 		// If title is provided, we still need category - do a quick analysis
-		analysis, err := analyzeNote(req.Content, isYouTube)
+		useDefaultSummary := customPromptText == "" && customPromptSchema == ""
+		analysis, err := analyzeNote(req.Content, isYouTube && useDefaultSummary)
 		if err != nil {
 			log.Printf("Failed to analyze note for category: %v", err)
 			category = "other"
 		} else {
 			category = analysis.Category
-			summary = analysis.Summary
+			if useDefaultSummary {
+				summary = analysis.Summary
+			}
+		}
+	}
+
+	// If custom prompt exists, generate structured summary with it
+	if customPromptText != "" || customPromptSchema != "" {
+		log.Printf("Generating summary with custom prompt for new note")
+		customSummary, customStructuredData, err := generateStructuredSummary(req.Content, customPromptText, customPromptSchema)
+		if err != nil {
+			log.Printf("Failed to generate custom summary: %v", err)
+			// Fall back to default summary if custom fails
+		} else {
+			summary = customSummary
+			structuredData = customStructuredData
+			log.Printf("Custom summary generated, length: %d, has structured data: %v", len(summary), structuredData != nil)
 		}
 	}
 
 	note := Note{
-		Title:    title,
-		Content:  req.Content,
-		Category: category,
-		Summary:  summary,
-		Created:  time.Now(),
-		Metadata: metadata,
+		Title:          title,
+		Content:        req.Content,
+		Category:       category,
+		Summary:        summary,
+		StructuredData: structuredData,
+		Created:        time.Now(),
+		Metadata:       metadata,
 	}
 
 	result, err := notesCollection.InsertOne(context.TODO(), note)
