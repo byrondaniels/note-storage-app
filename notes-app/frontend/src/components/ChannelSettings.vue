@@ -113,19 +113,22 @@
     </div>
 
     <!-- Delete Confirmation Modal -->
-    <div v-if="showDeleteModal" class="modal-overlay" @click.self="showDeleteModal = false">
-      <div class="modal-content">
-        <h2>Delete All Notes</h2>
-        <p>Are you sure you want to delete all <strong>{{ channelToDelete?.noteCount }}</strong> notes from <strong>{{ channelToDelete?.name }}</strong>?</p>
-        <p class="warning">This action cannot be undone.</p>
-        <div class="modal-actions">
-          <button @click="showDeleteModal = false" class="cancel-btn">Cancel</button>
-          <button @click="confirmDelete" :disabled="deleting" class="delete-btn">
-            {{ deleting ? 'Deleting...' : 'Delete All' }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <BaseModal
+      :show="showDeleteModal"
+      title="Delete All Notes"
+      size="small"
+      @close="showDeleteModal = false"
+    >
+      <p>Are you sure you want to delete all <strong>{{ channelToDelete?.noteCount }}</strong> notes from <strong>{{ channelToDelete?.name }}</strong>?</p>
+      <p class="warning">This action cannot be undone.</p>
+
+      <template #footer>
+        <button @click="showDeleteModal = false" class="cancel-btn">Cancel</button>
+        <button @click="confirmDelete" :disabled="deleting" class="delete-btn">
+          {{ deleting ? 'Deleting...' : 'Delete All' }}
+        </button>
+      </template>
+    </BaseModal>
 
     <!-- Prompt Templates Section -->
     <div class="templates-section">
@@ -282,6 +285,56 @@
             <span v-if="savedChannel === channel.name" class="saved-indicator">Saved!</span>
           </div>
 
+          <!-- Sync New Videos Section -->
+          <div class="sync-section" v-if="channel.platform === 'youtube'">
+            <h4>Sync New Videos</h4>
+            <p>Import new videos from this channel. Already-imported videos will be skipped.</p>
+
+            <div v-if="!extensionAvailable" class="extension-warning-inline">
+              Extension required for syncing.
+            </div>
+
+            <div v-else-if="!channelSettings[channel.name]?.channelUrl" class="no-url-message">
+              No channel URL saved. Re-import this channel to enable syncing.
+            </div>
+
+            <div v-else class="sync-controls">
+              <div class="sync-row">
+                <select
+                  v-model="syncVideoLimit[channel.name]"
+                  :disabled="syncing === channel.name"
+                  class="sync-limit-select"
+                >
+                  <option value="5">5</option>
+                  <option value="10">10</option>
+                  <option value="20">20</option>
+                  <option value="50">50</option>
+                </select>
+                <button
+                  @click="startSync(channel)"
+                  :disabled="syncing === channel.name"
+                  class="sync-btn"
+                >
+                  {{ syncing === channel.name ? 'Syncing...' : 'Sync New Videos' }}
+                </button>
+              </div>
+
+              <div v-if="syncProgress.active && syncProgress.channelName === channel.name" class="sync-progress">
+                <div class="progress-info">
+                  <span class="progress-text">
+                    Processing video {{ syncProgress.current }} of {{ syncProgress.total }}
+                  </span>
+                  <span v-if="syncProgress.videoTitle" class="video-title">
+                    {{ syncProgress.videoTitle }}
+                  </span>
+                </div>
+                <div class="progress-bar">
+                  <div class="progress-fill sync-fill" :style="{ width: getSyncProgressPercentage(channel.name) + '%' }"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="resummary-section">
             <h4>Refresh Note Summary</h4>
             <p>Select a note and regenerate its summary using the current prompt settings.</p>
@@ -331,8 +384,9 @@
 
 <script>
 import axios from 'axios'
+import { API_URL } from '../utils/api'
+import BaseModal from './shared/BaseModal.vue'
 
-const API_URL = process.env.VUE_APP_API_URL || 'http://localhost:8080'
 const EXTENSION_ID = 'koodfochknchgnegkcmcfcidkfgdfgkc'
 
 const DEFAULT_PROMPT_TEXT = `Analyze this content and extract structured information.`
@@ -344,6 +398,9 @@ const DEFAULT_PROMPT_SCHEMA = `{
 
 export default {
   name: 'ChannelSettings',
+  components: {
+    BaseModal
+  },
   data() {
     return {
       channels: [],
@@ -382,7 +439,17 @@ export default {
       expandedTemplate: null,
       editingTemplates: {},
       savingTemplate: null,
-      deletingTemplate: null
+      deletingTemplate: null,
+      // Sync functionality
+      syncing: null,
+      syncVideoLimit: {},
+      syncProgress: {
+        active: false,
+        channelName: '',
+        current: 0,
+        total: 0,
+        videoTitle: ''
+      }
     }
   },
   computed: {
@@ -391,10 +458,21 @@ export default {
       return Object.values(this.channelSettings).filter(s => s && (s.promptText || s.promptSchema))
     },
     channelsWithCustomPrompts() {
-      return this.channels.filter(ch => {
+      // Get channels that have notes and custom prompts
+      const channelsWithNotes = this.channels.filter(ch => {
         const settings = this.channelSettings[ch.name]
         return settings && (settings.promptText || settings.promptSchema)
       })
+
+      // Get channel names that have notes
+      const channelNamesWithNotes = new Set(this.channels.map(ch => ch.name))
+
+      // Get saved templates that don't have notes (channel notes were deleted)
+      const orphanedTemplates = Object.values(this.channelSettings)
+        .filter(s => s && (s.promptText || s.promptSchema) && !channelNamesWithNotes.has(s.channelName))
+        .map(s => ({ name: s.channelName, platform: s.platform || 'youtube' }))
+
+      return [...channelsWithNotes, ...orphanedTemplates]
     },
     importProgressPercentage() {
       if (this.importProgress.total === 0) return 0
@@ -463,6 +541,8 @@ export default {
             promptText: existing?.promptText || '',
             promptSchema: existing?.promptSchema || ''
           }
+          // Initialize sync video limit
+          this.syncVideoLimit[channel.name] = '20'
         }
 
         // Initialize editing state for templates
@@ -724,14 +804,16 @@ export default {
 
         await axios.put(`${API_URL}/channel-settings/${encodeURIComponent(channel.name)}`, {
           platform: channel.platform,
+          channelUrl: this.channelSettings[channel.name]?.channelUrl || '',
           promptText: promptTextToSave,
           promptSchema: promptSchemaToSave
         })
 
-        // Update local cache
+        // Update local cache (preserve existing channelUrl)
         this.channelSettings[channel.name] = {
           channelName: channel.name,
           platform: channel.platform,
+          channelUrl: this.channelSettings[channel.name]?.channelUrl || '',
           promptText: promptTextToSave,
           promptSchema: promptSchemaToSave
         }
@@ -895,14 +977,61 @@ export default {
       }
     },
 
+    async startSync(channel) {
+      const url = this.channelSettings[channel.name]?.channelUrl
+
+      if (!url) {
+        alert('No channel URL saved. Please re-import this channel.')
+        return
+      }
+
+      this.syncing = channel.name
+      this.syncProgress = {
+        active: true,
+        channelName: channel.name,
+        current: 0,
+        total: 0,
+        videoTitle: ''
+      }
+
+      try {
+        chrome.runtime.sendMessage(EXTENSION_ID, {
+          action: 'importChannel',
+          channelUrl: url,
+          limit: parseInt(this.syncVideoLimit[channel.name] || '20')
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            alert('Failed to communicate with extension: ' + chrome.runtime.lastError.message)
+            this.syncing = null
+            this.syncProgress.active = false
+          }
+        })
+      } catch (error) {
+        alert('Error starting sync: ' + error.message)
+        this.syncing = null
+        this.syncProgress.active = false
+      }
+    },
+
+    getSyncProgressPercentage(channelName) {
+      if (this.syncProgress.channelName !== channelName || this.syncProgress.total === 0) {
+        return 0
+      }
+      return Math.round((this.syncProgress.current / this.syncProgress.total) * 100)
+    },
+
     async handleImportProgress(message) {
       const { current, total, status, videoTitle, completed, error, succeeded, skipped, failed, channelName } = message
 
-      // When we get the channel name and have pending prompt settings, save them
-      if (channelName && this.pendingImportPrompt && current === 1) {
+      // Check if this is a sync operation (syncing is set) or an import operation
+      const isSyncOperation = this.syncing !== null
+
+      // When we get the channel name and have pending prompt settings, save them (import only)
+      if (!isSyncOperation && channelName && this.pendingImportPrompt && current === 1) {
         try {
           await axios.put(`${API_URL}/channel-settings/${encodeURIComponent(channelName)}`, {
             platform: 'youtube',
+            channelUrl: this.importChannelUrl.trim(),
             promptText: this.pendingImportPrompt.promptText,
             promptSchema: this.pendingImportPrompt.promptSchema
           })
@@ -914,32 +1043,63 @@ export default {
       }
 
       if (completed) {
-        this.importing = false
-        this.importProgress.active = false
+        if (isSyncOperation) {
+          // Handle sync completion
+          this.syncing = null
+          this.syncProgress.active = false
 
-        if (error) {
-          this.importMessage = `Import failed: ${error}`
-          this.importMessageType = 'error'
+          if (error) {
+            alert(`Sync failed: ${error}`)
+          } else {
+            const parts = []
+            if (succeeded > 0) parts.push(`${succeeded} imported`)
+            if (skipped > 0) parts.push(`${skipped} skipped`)
+            if (failed > 0) parts.push(`${failed} failed`)
+            alert(`Sync complete! ${parts.join(', ')}`)
+
+            // Reload to update note counts
+            await this.loadData()
+          }
         } else {
-          const parts = []
-          if (succeeded > 0) parts.push(`${succeeded} imported`)
-          if (skipped > 0) parts.push(`${skipped} skipped`)
-          if (failed > 0) parts.push(`${failed} failed`)
+          // Handle import completion
+          this.importing = false
+          this.importProgress.active = false
 
-          this.importMessage = `Import complete! ${parts.join(', ')}`
-          this.importMessageType = succeeded > 0 ? 'success' : 'warning'
+          if (error) {
+            this.importMessage = `Import failed: ${error}`
+            this.importMessageType = 'error'
+          } else {
+            const parts = []
+            if (succeeded > 0) parts.push(`${succeeded} imported`)
+            if (skipped > 0) parts.push(`${skipped} skipped`)
+            if (failed > 0) parts.push(`${failed} failed`)
 
-          // Reload channels list to show new channel
-          await this.loadData()
+            this.importMessage = `Import complete! ${parts.join(', ')}`
+            this.importMessageType = succeeded > 0 ? 'success' : 'warning'
+
+            // Reload channels list to show new channel
+            await this.loadData()
+          }
         }
         return
       }
 
-      this.importProgress = {
-        active: true,
-        current: current || 0,
-        total: total || 0,
-        videoTitle: videoTitle || ''
+      // Update progress
+      if (isSyncOperation) {
+        this.syncProgress = {
+          active: true,
+          channelName: this.syncing,
+          current: current || 0,
+          total: total || 0,
+          videoTitle: videoTitle || ''
+        }
+      } else {
+        this.importProgress = {
+          active: true,
+          current: current || 0,
+          total: total || 0,
+          videoTitle: videoTitle || ''
+        }
       }
     }
   }
@@ -1525,6 +1685,93 @@ textarea:focus {
   font-weight: 500;
 }
 
+/* Sync Section */
+.sync-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.sync-section h4 {
+  color: #333;
+  margin: 0 0 8px 0;
+  font-size: 14px;
+}
+
+.sync-section > p {
+  color: #666;
+  font-size: 13px;
+  margin: 0 0 12px 0;
+}
+
+.extension-warning-inline {
+  color: #856404;
+  background: #fff3cd;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.no-url-message {
+  color: #666;
+  font-size: 13px;
+  font-style: italic;
+}
+
+.sync-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sync-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.sync-limit-select {
+  width: 70px;
+  padding: 10px 8px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  background: white;
+}
+
+.sync-btn {
+  background: #ff0000;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+.sync-btn:hover:not(:disabled) {
+  background: #cc0000;
+}
+
+.sync-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.sync-progress {
+  background: #fff3e0;
+  border: 1px solid #ffcc80;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.sync-fill {
+  background: linear-gradient(90deg, #ff9800, #ffb74d) !important;
+}
+
 /* Resummary Section */
 .resummary-section {
   margin-top: 24px;
@@ -1633,52 +1880,14 @@ textarea:focus {
   background: #c82333;
 }
 
-/* Modal */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
+/* Modal Styles - Base styles moved to BaseModal.vue */
 
-.modal-content {
-  background: white;
-  padding: 24px;
-  border-radius: 12px;
-  max-width: 400px;
-  width: 90%;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-}
-
-.modal-content h2 {
-  margin: 0 0 16px 0;
-  color: #333;
-}
-
-.modal-content p {
-  margin: 0 0 12px 0;
-  color: #666;
-}
-
-.modal-content .warning {
+.warning {
   color: #dc3545;
   font-weight: 500;
 }
 
-.modal-actions {
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-  margin-top: 20px;
-}
-
-.modal-actions .cancel-btn {
+.cancel-btn {
   background: #e0e0e0;
   color: #333;
   border: none;
@@ -1688,11 +1897,11 @@ textarea:focus {
   font-size: 14px;
 }
 
-.modal-actions .cancel-btn:hover {
+.cancel-btn:hover {
   background: #d0d0d0;
 }
 
-.modal-actions .delete-btn {
+.delete-btn {
   background: #dc3545;
   color: white;
   border: none;
@@ -1702,11 +1911,11 @@ textarea:focus {
   font-size: 14px;
 }
 
-.modal-actions .delete-btn:hover:not(:disabled) {
+.delete-btn:hover:not(:disabled) {
   background: #c82333;
 }
 
-.modal-actions .delete-btn:disabled {
+.delete-btn:disabled {
   background: #999;
   cursor: not-allowed;
 }

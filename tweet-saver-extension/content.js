@@ -1260,6 +1260,17 @@ class SocialMediaSaver {
         body: JSON.stringify(payload)
       });
 
+      // Handle 409 Conflict (duplicate note) as skipped, not error
+      if (response.status === 409) {
+        console.log('Social Media Note Saver: Note already exists (duplicate):', videoInfo.title);
+        return {
+          success: true,
+          skipped: true,
+          videoId: videoId,
+          title: videoInfo.title
+        };
+      }
+
       if (!response.ok) {
         throw new Error(`API request failed: ${response.status} ${response.statusText}`);
       }

@@ -67,12 +67,12 @@
           </div>
           
           <div class="result-content">
-            <p>{{ truncateContent(result.note.content, 200) }}</p>
+            <p>{{ getPreview(result.note.content, 200) }}</p>
           </div>
           
           <div class="result-footer">
             <span class="result-date">
-              Created: {{ formatDate(result.note.created) }}
+              Created: {{ formatDate(result.note.created, { includeTime: true }) }}
             </span>
             <button @click="expandNote(result.note)" class="expand-button">
               View Full Note
@@ -83,33 +83,39 @@
     </div>
 
     <!-- Modal for expanded note view -->
-    <div v-if="expandedNote" class="modal-overlay" @click="closeModal">
-      <div class="modal-content" @click.stop>
-        <div class="modal-header">
-          <div class="modal-title-section">
-            <h2>{{ expandedNote.title }}</h2>
-            <span v-if="expandedNote.category" class="category-badge">{{ formatCategoryName(expandedNote.category) }}</span>
-          </div>
-          <button @click="closeModal" class="close-button">&times;</button>
+    <BaseModal
+      :show="!!expandedNote"
+      size="xlarge"
+      @close="closeModal"
+    >
+      <template #header>
+        <div class="modal-title-section">
+          <h2>{{ expandedNote?.title }}</h2>
+          <span v-if="expandedNote?.category" class="category-badge">{{ formatCategoryName(expandedNote.category) }}</span>
         </div>
-        <div class="modal-body">
-          <div class="note-meta">
-            Created: {{ formatDate(expandedNote.created) }}
-          </div>
-          <div class="note-content">
-            {{ expandedNote.content }}
-          </div>
-        </div>
+      </template>
+
+      <div class="note-meta">
+        Created: {{ formatDate(expandedNote.created, { includeTime: true }) }}
       </div>
-    </div>
+      <div class="note-content">
+        {{ expandedNote.content }}
+      </div>
+    </BaseModal>
   </div>
 </template>
 
 <script>
 import axios from 'axios'
+import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
+import { API_URL } from '../utils/api'
+import BaseModal from './shared/BaseModal.vue'
 
 export default {
   name: 'SearchNotes',
+  components: {
+    BaseModal
+  },
   data() {
     return {
       searchQuery: '',
@@ -123,6 +129,9 @@ export default {
     }
   },
   methods: {
+    formatCategoryName,
+    formatDate,
+    getPreview,
     async performSearch() {
       if (!this.searchQuery.trim()) return
 
@@ -131,8 +140,7 @@ export default {
       this.lastSearchQuery = this.searchQuery
 
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        const response = await axios.post(`${apiUrl}/search`, {
+        const response = await axios.post(`${API_URL}/search`, {
           query: this.searchQuery,
           limit: parseInt(this.searchLimit)
         })
@@ -148,30 +156,12 @@ export default {
       }
     },
 
-    truncateContent(content, maxLength) {
-      if (content.length <= maxLength) return content
-      return content.substring(0, maxLength) + '...'
-    },
-
-    formatDate(dateString) {
-      const date = new Date(dateString)
-      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString()
-    },
-
     expandNote(note) {
       this.expandedNote = note
     },
 
     closeModal() {
       this.expandedNote = null
-    },
-
-    formatCategoryName(category) {
-      if (!category) return ''
-      return category
-        .split('-')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ')
     }
   }
 }
@@ -406,68 +396,15 @@ h1 {
   background-color: #2980b9;
 }
 
-/* Modal styles */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.7);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background: white;
-  border-radius: 8px;
-  max-width: 80vw;
-  max-height: 80vh;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20px;
-  border-bottom: 1px solid #eee;
-}
+/* Modal styles - Base styles moved to BaseModal.vue */
 
 .modal-title-section {
   flex: 1;
 }
 
-.modal-header h2 {
+.modal-title-section h2 {
   margin: 0 0 8px 0;
   color: #2c3e50;
-}
-
-.close-button {
-  background: none;
-  border: none;
-  font-size: 24px;
-  cursor: pointer;
-  color: #999;
-  padding: 0;
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.close-button:hover {
-  color: #666;
-}
-
-.modal-body {
-  padding: 20px;
-  overflow-y: auto;
 }
 
 .note-meta {

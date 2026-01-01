@@ -27,14 +27,16 @@ import (
 )
 
 type Note struct {
-	ID             primitive.ObjectID     `json:"id" bson:"_id,omitempty"`
-	Title          string                 `json:"title" bson:"title"`
-	Content        string                 `json:"content" bson:"content"`
-	Summary        string                 `json:"summary" bson:"summary"`
-	StructuredData map[string]interface{} `json:"structuredData" bson:"structured_data"`
-	Category       string                 `json:"category" bson:"category"`
-	Created        time.Time              `json:"created" bson:"created"`
-	Metadata       map[string]interface{} `json:"metadata" bson:"metadata"`
+	ID                primitive.ObjectID     `json:"id" bson:"_id,omitempty"`
+	Title             string                 `json:"title" bson:"title"`
+	Content           string                 `json:"content" bson:"content"`
+	Summary           string                 `json:"summary" bson:"summary"`
+	StructuredData    map[string]interface{} `json:"structuredData" bson:"structured_data"`
+	Category          string                 `json:"category" bson:"category"`
+	Created           time.Time              `json:"created" bson:"created"`
+	SourcePublishedAt *time.Time             `json:"sourcePublishedAt,omitempty" bson:"source_published_at,omitempty"`
+	LastSummarizedAt  *time.Time             `json:"lastSummarizedAt,omitempty" bson:"last_summarized_at,omitempty"`
+	Metadata          map[string]interface{} `json:"metadata" bson:"metadata"`
 }
 
 type NoteChunk struct {
@@ -103,6 +105,7 @@ type ChannelSettings struct {
 	ID           primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	ChannelName  string             `json:"channelName" bson:"channel_name"`
 	Platform     string             `json:"platform" bson:"platform"`
+	ChannelUrl   string             `json:"channelUrl" bson:"channel_url"`     // YouTube channel URL for sync
 	PromptText   string             `json:"promptText" bson:"prompt_text"`     // Instructions for the AI
 	PromptSchema string             `json:"promptSchema" bson:"prompt_schema"` // Expected JSON output structure
 	UpdatedAt    time.Time          `json:"updatedAt" bson:"updated_at"`
@@ -616,6 +619,23 @@ func getNotes(c *gin.Context) {
 	c.JSON(http.StatusOK, notes)
 }
 
+// checkNoteExistsByURL checks if a note with the given URL already exists
+func checkNoteExistsByURL(url string) (bool, error) {
+	if url == "" {
+		return false, nil
+	}
+
+	count, err := notesCollection.CountDocuments(
+		context.Background(),
+		bson.M{"metadata.url": url},
+	)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
+
 type CreateNoteRequest struct {
 	Content  string                 `json:"content" binding:"required"`
 	Title    string                 `json:"title,omitempty"`    // Optional, will be auto-generated if empty
@@ -715,14 +735,45 @@ func createNote(c *gin.Context) {
 		}
 	}
 
+	// Parse SourcePublishedAt from metadata.timestamp if available
+	var sourcePublishedAt *time.Time
+	if ts, ok := metadata["timestamp"].(string); ok && ts != "" {
+		if parsed, err := time.Parse(time.RFC3339, ts); err == nil {
+			sourcePublishedAt = &parsed
+		} else {
+			log.Printf("Failed to parse timestamp '%s': %v", ts, err)
+		}
+	}
+
+	// Set LastSummarizedAt if we generated a summary
+	var lastSummarizedAt *time.Time
+	if summary != "" {
+		now := time.Now()
+		lastSummarizedAt = &now
+	}
+
 	note := Note{
-		Title:          title,
-		Content:        req.Content,
-		Category:       category,
-		Summary:        summary,
-		StructuredData: structuredData,
-		Created:        time.Now(),
-		Metadata:       metadata,
+		Title:             title,
+		Content:           req.Content,
+		Category:          category,
+		Summary:           summary,
+		StructuredData:    structuredData,
+		Created:           time.Now(),
+		SourcePublishedAt: sourcePublishedAt,
+		LastSummarizedAt:  lastSummarizedAt,
+		Metadata:          metadata,
+	}
+
+	// Check for duplicate URL before inserting
+	if urlVal, ok := metadata["url"].(string); ok && urlVal != "" {
+		exists, err := checkNoteExistsByURL(urlVal)
+		if err != nil {
+			log.Printf("Error checking for duplicate URL: %v", err)
+		} else if exists {
+			log.Printf("Duplicate note detected for URL: %s", urlVal)
+			c.JSON(http.StatusConflict, gin.H{"error": "duplicate", "url": urlVal})
+			return
+		}
 	}
 
 	result, err := notesCollection.InsertOne(context.TODO(), note)
@@ -1401,8 +1452,11 @@ func summarizeNote(c *gin.Context) {
 		return
 	}
 
-	// Update the note in the database with summary and structured data
-	updateFields := bson.M{"summary": summary}
+	// Update the note in the database with summary, structured data, and last summarized timestamp
+	updateFields := bson.M{
+		"summary":            summary,
+		"last_summarized_at": time.Now(),
+	}
 	if structuredData != nil {
 		updateFields["structured_data"] = structuredData
 	}
@@ -1480,8 +1534,11 @@ func summarizeNoteById(c *gin.Context) {
 		return
 	}
 
-	// Update the note in the database with summary and structured data
-	updateFields := bson.M{"summary": summary}
+	// Update the note in the database with summary, structured data, and last summarized timestamp
+	updateFields := bson.M{
+		"summary":            summary,
+		"last_summarized_at": time.Now(),
+	}
 	if structuredData != nil {
 		updateFields["structured_data"] = structuredData
 	}
@@ -1744,6 +1801,7 @@ func getChannelSettings(c *gin.Context) {
 		// Return default settings if not found
 		c.JSON(http.StatusOK, ChannelSettings{
 			ChannelName:  channelName,
+			ChannelUrl:   "",
 			PromptText:   "",
 			PromptSchema: "",
 		})
@@ -1763,6 +1821,7 @@ func updateChannelSettings(c *gin.Context) {
 
 	var req struct {
 		Platform     string `json:"platform"`
+		ChannelUrl   string `json:"channelUrl"`
 		PromptText   string `json:"promptText"`
 		PromptSchema string `json:"promptSchema"`
 	}
@@ -1784,6 +1843,7 @@ func updateChannelSettings(c *gin.Context) {
 	settings := ChannelSettings{
 		ChannelName:  channelName,
 		Platform:     req.Platform,
+		ChannelUrl:   req.ChannelUrl,
 		PromptText:   req.PromptText,
 		PromptSchema: req.PromptSchema,
 		UpdatedAt:    time.Now(),
@@ -1880,12 +1940,6 @@ func deleteChannelNotes(c *gin.Context) {
 			deletedNotes++
 		}
 	}
-
-	// Also delete channel settings
-	channelSettingsCollection.DeleteOne(
-		context.Background(),
-		bson.M{"channel_name": channelName},
-	)
 
 	log.Printf("Deleted %d notes and %d chunks for channel: %s", deletedNotes, deletedChunks, channelName)
 

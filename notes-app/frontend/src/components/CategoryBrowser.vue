@@ -38,9 +38,9 @@
              :key="note.id" 
              class="note-card">
           <h4>{{ note.title }}</h4>
-          <p class="note-preview">{{ getPreview(note.content) }}</p>
+          <p class="note-preview">{{ getPreview(note.content, 150) }}</p>
           <div class="note-meta">
-            <span class="note-date">{{ formatDate(note.created) }}</span>
+            <span class="note-date">{{ formatDate(note.created, { includeTime: true }) }}</span>
             <span class="category-badge">{{ formatCategoryName(note.category) }}</span>
           </div>
         </div>
@@ -56,6 +56,9 @@
 </template>
 
 <script>
+import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
+import { API_URL } from '../utils/api'
+
 export default {
   name: 'CategoryBrowser',
   data() {
@@ -72,10 +75,13 @@ export default {
     await this.loadCategories()
   },
   methods: {
+    formatCategoryName,
+    formatDate,
+    getPreview,
     async loadCategories() {
       try {
         this.loading = true
-        const response = await fetch('http://localhost:8080/categories')
+        const response = await fetch(`${API_URL}/categories`)
         if (!response.ok) throw new Error('Failed to fetch categories')
         
         this.categories = await response.json()
@@ -98,8 +104,8 @@ export default {
       try {
         this.selectedCategory = categoryName
         this.notesLoading = true
-        
-        const response = await fetch(`http://localhost:8080/notes/category/${categoryName}`)
+
+        const response = await fetch(`${API_URL}/notes/category/${categoryName}`)
         if (!response.ok) throw new Error('Failed to fetch notes')
         
         this.categoryNotes = await response.json()
@@ -114,24 +120,6 @@ export default {
     goBack() {
       this.selectedCategory = null
       this.categoryNotes = []
-    },
-    
-    formatCategoryName(category) {
-      return category
-        .split('-')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ')
-    },
-    
-    getPreview(content) {
-      if (!content) return 'No content'
-      return content.length > 150 ? content.substring(0, 150) + '...' : content
-    },
-    
-    formatDate(dateString) {
-      if (!dateString) return ''
-      const date = new Date(dateString)
-      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
     }
   }
 }

@@ -382,6 +382,30 @@ curl -X POST http://localhost:8080/search -d '{"query":"test"}' -H "Content-Type
 3. Load unpacked → select tweet-saver-extension folder
 4. Navigate to Twitter/LinkedIn/YouTube and verify save buttons appear
 
+## Build Scripts
+
+**IMPORTANT: Always use these scripts to verify code changes compile before telling the user changes are complete.**
+
+Located in `notes-app/scripts/`:
+
+| Script | Purpose | When to Use |
+|--------|---------|-------------|
+| `build-backend.sh` | Build Go backend via Docker | After modifying `main.go` or Go code |
+| `build-frontend.sh` | Build Vue frontend via Docker | After modifying `.vue` or frontend code |
+| `build-all.sh` | Build both services | After modifying both backend and frontend |
+
+**Usage:**
+```bash
+# From anywhere - scripts use relative paths
+./notes-app/scripts/build-backend.sh
+./notes-app/scripts/build-frontend.sh
+./notes-app/scripts/build-all.sh
+```
+
+These scripts output only the last few lines to minimize context usage. A successful build shows `Built` in the output.
+
+**Verification requirement:** After making code changes, run the appropriate build script and confirm it succeeds before reporting completion to the user.
+
 ## Common Tasks
 
 ### Adding a New API Endpoint

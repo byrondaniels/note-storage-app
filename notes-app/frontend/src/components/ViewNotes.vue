@@ -212,10 +212,23 @@
               </div>
               <div class="note-detail-meta">
                 <span v-if="selectedNote.category" class="category-badge large">{{ formatCategoryName(selectedNote.category) }}</span>
-                <span class="note-detail-date">{{ formatDate(selectedNote.created) }}</span>
+              </div>
+              <div class="note-dates">
+                <div class="date-item">
+                  <span class="date-label">Date Imported:</span>
+                  <span class="date-value">{{ formatDate(selectedNote.created) }}</span>
+                </div>
+                <div v-if="selectedNote.sourcePublishedAt" class="date-item">
+                  <span class="date-label">Source Published:</span>
+                  <span class="date-value">{{ formatDate(selectedNote.sourcePublishedAt) }}</span>
+                </div>
+                <div v-if="selectedNote.lastSummarizedAt" class="date-item">
+                  <span class="date-label">Last Summarized:</span>
+                  <span class="date-value">{{ formatDate(selectedNote.lastSummarizedAt) }}</span>
+                </div>
               </div>
             </div>
-            
+
             <div class="note-actions">
               <button @click="openAIModal" class="action-btn ai-btn" title="Ask AI about this note">
                 <span class="action-icon">🤖</span>
@@ -364,75 +377,78 @@
     </div>
     
     <!-- Delete Confirmation Modal -->
-    <div v-if="showDeleteModal" class="modal-overlay" @click="cancelDelete">
-      <div class="modal-content delete-modal" @click.stop>
-        <div class="modal-header">
-          <h3>Delete Note</h3>
-          <button @click="cancelDelete" class="close-btn">&times;</button>
-        </div>
-        <div class="modal-body">
-          <p>Are you sure you want to delete this note?</p>
-          <p class="note-title-preview">"{{ noteToDelete?.title }}"</p>
-          <p class="warning">This action cannot be undone.</p>
-        </div>
-        <div class="modal-footer">
-          <button @click="cancelDelete" class="btn btn-secondary">Cancel</button>
-          <button @click="deleteNote" class="btn btn-danger" :disabled="deleting">
-            {{ deleting ? 'Deleting...' : 'Delete' }}
-          </button>
-        </div>
-      </div>
-    </div>
-    
+    <BaseModal
+      :show="showDeleteModal"
+      title="Delete Note"
+      size="small"
+      @close="cancelDelete"
+    >
+      <p>Are you sure you want to delete this note?</p>
+      <p class="note-title-preview">"{{ noteToDelete?.title }}"</p>
+      <p class="warning">This action cannot be undone.</p>
+
+      <template #footer>
+        <button @click="cancelDelete" class="btn btn-secondary">Cancel</button>
+        <button @click="deleteNote" class="btn btn-danger" :disabled="deleting">
+          {{ deleting ? 'Deleting...' : 'Delete' }}
+        </button>
+      </template>
+    </BaseModal>
+
     <!-- AI Questions Modal -->
-    <div v-if="showAIModal" class="modal-overlay" @click="closeAIModal">
-      <div class="modal-content ai-modal" @click.stop>
-        <div class="modal-header">
-          <h3>AI Questions</h3>
-          <button @click="closeAIModal" class="close-btn">&times;</button>
+    <BaseModal
+      :show="showAIModal"
+      title="AI Questions"
+      size="large"
+      :close-on-overlay-click="!aiLoading"
+      @close="closeAIModal"
+    >
+      <p class="ai-modal-description">Below is the prompt that will be passed along with this content:</p>
+
+      <div class="form-group">
+        <textarea
+          v-model="aiPrompt"
+          class="form-textarea ai-prompt-textarea"
+          placeholder="Enter your question or request about this note..."
+          :disabled="aiLoading"
+          @keydown="handleAIModalKeydown"
+        ></textarea>
+      </div>
+
+      <!-- AI Response Section -->
+      <div v-if="aiResponse || aiLoading" class="ai-response-section">
+        <h4>AI Response:</h4>
+        <div v-if="aiLoading" class="ai-loading">
+          <div class="ai-spinner"></div>
+          <span>Getting AI response...</span>
         </div>
-        <div class="modal-body">
-          <p class="ai-modal-description">Below is the prompt that will be passed along with this content:</p>
-          
-          <div class="form-group">
-            <textarea 
-              v-model="aiPrompt" 
-              class="form-textarea ai-prompt-textarea"
-              placeholder="Enter your question or request about this note..."
-              :disabled="aiLoading"
-              @keydown="handleAIModalKeydown"
-            ></textarea>
-          </div>
-          
-          <!-- AI Response Section -->
-          <div v-if="aiResponse || aiLoading" class="ai-response-section">
-            <h4>AI Response:</h4>
-            <div v-if="aiLoading" class="ai-loading">
-              <div class="ai-spinner"></div>
-              <span>Getting AI response...</span>
-            </div>
-            <div v-else class="ai-response">
-              {{ aiResponse }}
-            </div>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button @click="closeAIModal" class="btn btn-secondary" :disabled="aiLoading">Close</button>
-          <button @click="sendToAI" class="btn btn-primary ai-send-btn" :disabled="aiLoading || !aiPrompt.trim()">
-            {{ aiLoading ? 'Sending...' : 'Send to AI' }}
-          </button>
+        <div v-else class="ai-response">
+          {{ aiResponse }}
         </div>
       </div>
-    </div>
+
+      <template #footer>
+        <button @click="closeAIModal" class="btn btn-secondary" :disabled="aiLoading">Close</button>
+        <button @click="sendToAI" class="btn btn-primary ai-send-btn" :disabled="aiLoading || !aiPrompt.trim()">
+          {{ aiLoading ? 'Sending...' : 'Send to AI' }}
+        </button>
+      </template>
+    </BaseModal>
     
   </div>
 </template>
 
 <script>
 import axios from 'axios'
+import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
+import { API_URL } from '../utils/api'
+import BaseModal from './shared/BaseModal.vue'
 
 export default {
   name: 'ViewNotes',
+  components: {
+    BaseModal
+  },
   data() {
     return {
       notes: [],
@@ -549,13 +565,15 @@ export default {
     document.removeEventListener('keydown', this.handleGlobalKeydown)
   },
   methods: {
+    formatCategoryName,
+    formatDate,
+    getPreview,
     async fetchNotes() {
       this.loading = true
       this.error = ''
-      
+
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        const response = await axios.get(`${apiUrl}/notes`)
+        const response = await axios.get(`${API_URL}/notes`)
         this.notes = response.data.sort((a, b) => new Date(b.created) - new Date(a.created))
         
         // Auto-select the first note if available
@@ -594,12 +612,11 @@ export default {
     },
     async performSearch() {
       if (!this.searchQuery.trim()) return
-      
+
       this.isSearching = true
-      
+
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        const response = await axios.post(`${apiUrl}/search`, {
+        const response = await axios.post(`${API_URL}/search`, {
           query: this.searchQuery.trim(),
           limit: 50 // Get more results for search
         })
@@ -638,10 +655,9 @@ export default {
     },
     async loadCategories() {
       this.categoriesLoading = true
-      
+
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        const response = await axios.get(`${apiUrl}/categories`)
+        const response = await axios.get(`${API_URL}/categories`)
         this.categories = response.data || []
         
         // Sort categories: ones with notes first, then alphabetically
@@ -663,12 +679,11 @@ export default {
     async selectCategory(categoryName) {
       // Clear search when selecting a category
       this.clearSearch()
-      
+
       this.selectedCategory = categoryName
-      
+
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        const response = await axios.get(`${apiUrl}/notes/category/${categoryName}`)
+        const response = await axios.get(`${API_URL}/notes/category/${categoryName}`)
         this.filteredNotes = response.data || []
         
         // Auto-select first filtered note if available
@@ -851,27 +866,25 @@ export default {
       }
       
       this.saving = true
-      
+
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        
         if (this.isCreatingNote) {
           // Create new note (title will be auto-generated)
-          const response = await axios.post(`${apiUrl}/notes`, {
+          const response = await axios.post(`${API_URL}/notes`, {
             content: this.editForm.content.trim()
           })
-          
+
           const newNote = response.data
-          
+
           // Add to notes array
           this.notes.unshift(newNote)
-          
+
           // Select the new note
           this.selectedNote = newNote
           this.isCreatingNote = false
         } else {
           // Update existing note (content only, title will be auto-generated)
-          const response = await axios.put(`${apiUrl}/notes/${this.editForm.id}`, {
+          const response = await axios.put(`${API_URL}/notes/${this.editForm.id}`, {
             content: this.editForm.content.trim()
           })
           
@@ -920,12 +933,11 @@ export default {
     },
     async deleteNote() {
       if (!this.noteToDelete) return
-      
+
       this.deleting = true
-      
+
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        await axios.delete(`${apiUrl}/notes/${this.noteToDelete.id}`)
+        await axios.delete(`${API_URL}/notes/${this.noteToDelete.id}`)
         
         // Remove from notes array
         this.notes = this.notes.filter(n => n.id !== this.noteToDelete.id)
@@ -956,21 +968,6 @@ export default {
       } finally {
         this.deleting = false
       }
-    },
-    getPreview(content) {
-      if (!content) return 'No content'
-      return content.length > 80 ? content.substring(0, 80) + '...' : content
-    },
-    formatDate(dateString) {
-      const date = new Date(dateString)
-      return date.toLocaleDateString()
-    },
-    formatCategoryName(category) {
-      if (!category) return ''
-      return category
-        .split('-')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ')
     },
     getSourceInfo(note) {
       if (!note || !note.metadata) return null
@@ -1047,13 +1044,12 @@ export default {
     },
     async sendToAI() {
       if (!this.selectedNote || !this.aiPrompt.trim()) return
-      
+
       this.aiLoading = true
       this.aiResponse = ''
-      
+
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        const response = await axios.post(`${apiUrl}/ai-question`, {
+        const response = await axios.post(`${API_URL}/ai-question`, {
           content: this.selectedNote.content,
           prompt: this.aiPrompt.trim()
         })
@@ -1100,21 +1096,23 @@ export default {
       this.summarizing = true
 
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        const response = await axios.post(`${apiUrl}/summarize`, {
+        const response = await axios.post(`${API_URL}/summarize`, {
           noteId: this.selectedNote.id,
           content: this.selectedNote.content
         })
 
-        // Update the selected note with the new summary and structured data
+        // Update the selected note with the new summary, structured data, and timestamp
+        const now = new Date().toISOString()
         this.selectedNote.summary = response.data.summary
         this.selectedNote.structuredData = response.data.structuredData
+        this.selectedNote.lastSummarizedAt = now
 
         // Update the note in the notes array
         const noteIndex = this.notes.findIndex(n => n.id === this.selectedNote.id)
         if (noteIndex !== -1) {
           this.notes[noteIndex].summary = response.data.summary
           this.notes[noteIndex].structuredData = response.data.structuredData
+          this.notes[noteIndex].lastSummarizedAt = now
         }
 
         // Update in filtered notes if applicable
@@ -1123,6 +1121,7 @@ export default {
           if (filteredIndex !== -1) {
             this.filteredNotes[filteredIndex].summary = response.data.summary
             this.filteredNotes[filteredIndex].structuredData = response.data.structuredData
+            this.filteredNotes[filteredIndex].lastSummarizedAt = now
           }
         }
 
@@ -1947,6 +1946,31 @@ export default {
   gap: 12px;
 }
 
+.note-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 8px;
+  padding: 8px 0;
+  border-top: 1px solid #e5e5ea;
+}
+
+.date-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.date-label {
+  color: #8e8e93;
+  font-weight: 500;
+}
+
+.date-value {
+  color: #1c1c1e;
+}
+
 /* Action Buttons */
 .note-actions {
   display: flex;
@@ -2192,96 +2216,7 @@ export default {
   background: #aeaeb2;
 }
 
-/* Modal Styles */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  max-width: 90vw;
-  max-height: 90vh;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.delete-modal {
-  width: 450px;
-}
-
-.edit-modal {
-  width: 600px;
-  max-height: 80vh;
-}
-
-.ai-modal {
-  width: 700px;
-  max-height: 85vh;
-}
-
-.modal-header {
-  padding: 24px 24px 16px 24px;
-  border-bottom: 1px solid #f0f0f0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: white;
-}
-
-.modal-header h3 {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: #1c1c1e;
-}
-
-.close-btn {
-  background: none;
-  border: none;
-  font-size: 24px;
-  cursor: pointer;
-  color: #8e8e93;
-  padding: 0;
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  transition: background-color 0.2s;
-}
-
-.close-btn:hover {
-  background-color: #f0f0f0;
-  color: #1c1c1e;
-}
-
-.modal-body {
-  padding: 20px 24px;
-  flex: 1;
-  overflow-y: auto;
-}
-
-.modal-footer {
-  padding: 16px 24px 24px 24px;
-  border-top: 1px solid #f0f0f0;
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  background: white;
-}
+/* Modal Styles - Base styles moved to BaseModal.vue */
 
 /* Delete Modal Specific */
 .note-title-preview {
@@ -2409,17 +2344,6 @@ export default {
   .note-detail-content {
     padding: 20px;
     font-size: 15px;
-  }
-  
-  .modal-content {
-    margin: 20px;
-    max-width: calc(100vw - 40px);
-  }
-  
-  .edit-modal,
-  .delete-modal,
-  .ai-modal {
-    width: auto;
   }
 }
 
