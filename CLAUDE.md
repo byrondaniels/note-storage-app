@@ -47,7 +47,8 @@ docker-compose up --build
 │  │ - QuestionAnswer│         │  │    Async Job Workers (3) │   │ │
 │  │ - CategoryBrowser│        │  │  - Chunking              │   │ │
 │  │ - SearchNotes   │         │  │  - Embedding generation  │   │ │
-│  │ - UploadNotes   │         │  │  - Category classification│  │ │
+│  │ - UploadNotes   │         │  │  - Combined AI analysis  │   │ │
+│  │ - ChannelSettings│        │  │  - Channel settings      │   │ │
 │  └─────────────────┘         │  └──────────────────────────┘   │ │
 │                              │              │                   │ │
 │                              └──────────────┼───────────────────┘ │
@@ -61,25 +62,29 @@ docker-compose up --build
              │ (port     │           │  (6333/    │      │ - Embeddings│
              │  27017)   │           │   6334)    │      │ - Generation│
              │           │           │            │      │ - Classify  │
-             │ - notes   │           │ - vectors  │      └────────────┘
-             │ - chunks  │           │ - 768 dim  │
-             └───────────┘           └────────────┘
+             │ db:notesdb│           │ - vectors  │      └────────────┘
+             │ - notes   │           │ - 768 dim  │
+             │ - chunks  │           └────────────┘
+             │ - channel_│
+             │   settings│
+             └───────────┘
 ```
 
 **Key Design Patterns:**
 - **Async Job Processing**: Note creation triggers background jobs for embedding/classification
+- **Combined AI Analysis**: Single Gemini call generates title, category, and summary together
 - **Chunking Strategy**: Long notes split into 1000-word chunks for embedding
 - **Vector Similarity Search**: Cosine similarity with 0.3 minimum relevance threshold
 - **Platform Abstraction**: Extension uses polymorphic pattern for multi-platform support
+- **Channel Import**: Extension can bulk-import YouTube channel transcripts via localhost bridge
 
 **Data Flow:**
 1. User creates note (via app or extension)
 2. Note saved to MongoDB immediately
-3. Async worker picks up job, generates title via Gemini
-4. Content classified into predefined categories
-5. Text chunked and embedded via Gemini text-embedding-004
-6. Embeddings stored in Qdrant with note references
-7. Search queries are embedded and matched against vectors
+3. Async worker picks up job, runs combined AI analysis (title + category + summary in one call)
+4. Text chunked and embedded via Gemini text-embedding-004
+5. Embeddings stored in Qdrant with note references
+6. Search queries are embedded and matched against vectors
 
 ## Directory Structure
 
@@ -112,6 +117,7 @@ note-storage-app/
 │           ├── App.vue                # Root component
 │           └── components/
 │               ├── ViewNotes.vue      # Main notes interface (largest)
+│               ├── ChannelSettings.vue# YouTube import & channel config
 │               ├── QuestionAnswer.vue # AI Q&A interface
 │               ├── SearchNotes.vue    # Semantic search
 │               ├── CategoryBrowser.vue# Category navigation
@@ -123,7 +129,8 @@ note-storage-app/
     ├── INSTALLATION.md
     ├── PROJECT_SUMMARY.md
     ├── content.js                     # Main platform logic (largest)
-    ├── background.js                  # Service worker
+    ├── background.js                  # Service worker, channel import
+    ├── localhost-bridge.js            # Vue app ↔ extension messaging
     ├── popup.html / popup.js          # Extension popup UI
     ├── options.html / options.js      # Settings page
     ├── styles.css                     # Button styling
@@ -142,10 +149,16 @@ note-storage-app/
 - `notes-app/.env.example` - Required: GEMINI_API_KEY
 - `tweet-saver-extension/manifest.json` - Extension permissions/config
 
+**Database Configuration:**
+- MongoDB URI: `mongodb://mongo:27017` (or `mongodb://localhost:27017` from host)
+- Database name: `notesdb`
+- Collections: `notes`, `chunks`, `channel_settings`
+
 **Central/Frequently Modified:**
-- `notes-app/backend/main.go` - All backend logic in single file (1300+ lines)
-- `notes-app/frontend/src/components/ViewNotes.vue` - Main UI (2300+ lines)
-- `tweet-saver-extension/content.js` - Platform detection/saving (1800+ lines)
+- `notes-app/backend/main.go` - All backend logic in single file (1800+ lines)
+- `notes-app/frontend/src/components/ViewNotes.vue` - Main UI (2500+ lines)
+- `notes-app/frontend/src/components/ChannelSettings.vue` - Import UI (1200+ lines)
+- `tweet-saver-extension/content.js` - Platform detection/saving (2100+ lines)
 
 ## Code Conventions
 
@@ -178,10 +191,12 @@ note-storage-app/
 
 **Key Exports/Types:**
 ```go
-type Note struct          // Main data model (line 28)
-type NoteChunk struct      // Embedding chunks (line 38)
-type SearchRequest struct  // Search payload (line 45)
-type ProcessingJob struct  // Async job data (line 83)
+type Note struct           // Main data model (line 28)
+type NoteChunk struct       // Embedding chunks (line 38)
+type SearchRequest struct   // Search payload (line 45)
+type ProcessingJob struct   // Async job data (line 83)
+type NoteAnalysis struct    // Combined AI result (title/category/summary)
+type ChannelSettings struct // Per-channel config (custom prompts)
 ```
 
 **API Endpoints:**
@@ -193,18 +208,24 @@ type ProcessingJob struct  // Async job data (line 83)
 - `POST /ask` - Q&A with context from notes
 - `POST /ai-question` - Ask about specific note
 - `POST /summarize` - Generate note summary
+- `POST /summarize/:id` - Summarize note by ID
 - `GET /categories` - List categories with counts
 - `GET /notes/category/:category` - Notes by category
 - `GET /categories/stats` - Category statistics
 - `POST /migrate/classify` - Classify uncategorized notes
 - `POST /migrate/titles` - Regenerate all titles
+- `GET /channels` - List channels with note counts
+- `GET /channel-settings` - Get all channel settings
+- `GET /channel-settings/:channel` - Get channel config
+- `PUT /channel-settings/:channel` - Update channel config
+- `DELETE /channels/:channel/notes` - Delete all notes for channel
 
 **Key Functions:**
-- `processNoteJob()` (line 317) - Main async processing pipeline
-- `generateEmbedding()` (line 466) - Gemini embedding generation
-- `classifyNote()` (line 278) - AI category classification
-- `generateTitle()` (line 1124) - AI title generation
-- `containsSensitiveData()` (line 419) - Security pattern matching
+- `processNoteJob()` - Main async processing pipeline
+- `analyzeNote()` - Combined AI analysis (title + category + summary)
+- `generateEmbedding()` - Gemini embedding generation
+- `classifyNote()` - AI category classification (standalone)
+- `containsSensitiveData()` - Security pattern matching
 
 **Dependencies:**
 - MongoDB: Note/chunk storage
@@ -219,7 +240,8 @@ type ProcessingJob struct  // Async job data (line 83)
 
 | Component | Purpose | Lines |
 |-----------|---------|-------|
-| ViewNotes.vue | Main two-panel notes interface | ~2300 |
+| ViewNotes.vue | Main two-panel notes interface | ~2500 |
+| ChannelSettings.vue | YouTube import & channel config | ~1200 |
 | QuestionAnswer.vue | AI-powered Q&A across notes | ~600 |
 | SearchNotes.vue | Semantic search interface | ~600 |
 | CategoryBrowser.vue | Category navigation | ~400 |
@@ -228,11 +250,19 @@ type ProcessingJob struct  // Async job data (line 83)
 **ViewNotes.vue Features:**
 - Two-panel layout (list + detail)
 - Category filtering with expandable section
+- Channel filtering (group by author/channel)
 - Semantic search with debounce
 - Inline editing with keyboard shortcuts
-- Summary generation
+- Summary generation with custom prompts
 - AI questions modal
 - Delete confirmation
+
+**ChannelSettings.vue Features:**
+- YouTube channel import via extension
+- Bulk transcript extraction
+- Custom summary prompts per channel
+- Import progress tracking
+- Channel management (delete all notes)
 
 **Dependencies:**
 - axios: HTTP client
@@ -247,7 +277,8 @@ type ProcessingJob struct  // Async job data (line 83)
 | File | Purpose |
 |------|---------|
 | content.js | Platform detection, content extraction, button injection |
-| background.js | Service worker, config storage, API testing |
+| background.js | Service worker, config storage, channel import |
+| localhost-bridge.js | Message relay between Vue app and extension |
 | popup.js | Quick settings UI |
 | options.js | Advanced configuration page |
 
@@ -305,7 +336,19 @@ type ProcessingJob struct  // Async job data (line 83)
 }
 ```
 
-**Predefined Categories (line 101-131):**
+**ChannelSettings Schema:**
+```go
+{
+  _id:           ObjectID,
+  channel_name:  string,    // Author/channel name
+  platform:      string,    // youtube/twitter/linkedin
+  summary_mode:  string,    // "default" or "custom"
+  custom_prompt: string,    // Custom summary prompt
+  updated_at:    time.Time
+}
+```
+
+**Predefined Categories:**
 ```
 journal, reflections, goals, ideas, thoughts, dreams, personal-growth,
 recipes, workouts, meal-planning, health-tips, medical, nutrition,
@@ -377,7 +420,7 @@ curl -X POST http://localhost:8080/search -d '{"query":"test"}' -H "Content-Type
 
 ### Backend Gotchas
 
-1. **Single File Backend**: All 1300+ lines in main.go - consider splitting for larger changes
+1. **Single File Backend**: All 1800+ lines in main.go - consider splitting for larger changes
 2. **Sensitive Data Detection** (line 419): Skips embedding for content with API keys, passwords
 3. **Gemini Rate Limits**: Workers may fail silently on API rate limits
 4. **gRPC Port**: Qdrant uses 6334 for gRPC, not 6333 (HTTP)
@@ -385,7 +428,7 @@ curl -X POST http://localhost:8080/search -d '{"query":"test"}' -H "Content-Type
 
 ### Frontend Gotchas
 
-1. **Large Components**: ViewNotes.vue is 2300+ lines - complex state management
+1. **Large Components**: ViewNotes.vue (2500+) and ChannelSettings.vue (1200+) - complex state management
 2. **Console Debug Logs**: Lines 157-158 have console.log in template (development artifacts)
 3. **No State Management**: Uses component-local state, not Vuex/Pinia
 4. **API URL**: Hardcoded fallback to localhost:8080 if VUE_APP_API_URL not set
@@ -401,9 +444,11 @@ curl -X POST http://localhost:8080/search -d '{"query":"test"}' -H "Content-Type
 
 1. **Monolithic Backend**: Single file chosen for simplicity in early development
 2. **Text-embedding-004**: 768-dimensional embeddings, good balance of quality/cost
-3. **Gemini 2.5 Flash**: Used for generation tasks (classification, summaries, titles)
-4. **Chunk Size 1000 words**: Balances context window vs embedding quality
-5. **3 Workers**: Parallel processing for embedding generation
+3. **Gemini 2.5 Flash Lite**: Used for generation tasks (classification, summaries, titles)
+4. **Combined AI Analysis**: Single API call for title+category+summary reduces latency
+5. **Chunk Size 1000 words**: Balances context window vs embedding quality
+6. **3 Workers**: Parallel processing for embedding generation
+7. **Localhost Bridge**: Extension communicates with Vue app via content script injection
 
 ### Technical Debt Areas
 
@@ -415,6 +460,16 @@ curl -X POST http://localhost:8080/search -d '{"query":"test"}' -H "Content-Type
 
 ## Meta
 
-- **Last analyzed:** 2025-12-30
-- **Git SHA:** 7928068a07421bdcd1dec583347cbba6209a2b73
-- **Files analyzed:** 23
+- **Last analyzed:** 2025-12-31
+- **Git SHA:** 0b80c1442bec4c029ff0e4f4f7d96541e6f6f116
+- **Files analyzed:** 24
+
+### Changelog
+
+**2025-12-31** (0b80c14)
+- Added YouTube channel import feature with `ChannelSettings.vue` component
+- New `channel_settings` MongoDB collection for per-channel config
+- Combined AI analysis (`analyzeNote()`) reduces API calls by generating title/category/summary together
+- Added channel-related API endpoints (`/channels`, `/channel-settings`)
+- Extension now supports bulk transcript import via `localhost-bridge.js`
+- Switched from `gemini-2.5-flash` to `gemini-2.5-flash-lite` model

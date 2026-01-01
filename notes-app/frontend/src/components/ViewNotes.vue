@@ -256,7 +256,13 @@
           <!-- Content based on current view -->
           <div class="note-detail-content">
             <div v-if="currentView === 'full'" class="full-content">
-              {{ selectedNote.content }}
+              <div class="content-header">
+                <button @click="copyToClipboard(selectedNote.content, 'full')" class="copy-btn" :class="{ 'copied': copiedState === 'full' }">
+                  <span v-if="copiedState === 'full'">Copied!</span>
+                  <span v-else>📋 Copy</span>
+                </button>
+              </div>
+              <div class="content-text">{{ selectedNote.content }}</div>
             </div>
             <div v-else-if="currentView === 'summary'" class="summary-content">
               <div v-if="summarizing" class="summary-loading">
@@ -264,10 +270,45 @@
                 <p>Generating summary...</p>
               </div>
               <div v-else-if="selectedNote.summary" class="summary-text">
-                {{ selectedNote.summary }}
+                <div class="content-header">
+                  <button @click="copyToClipboard(selectedNote.summary, 'summary')" class="copy-btn" :class="{ 'copied': copiedState === 'summary' }">
+                    <span v-if="copiedState === 'summary'">Copied!</span>
+                    <span v-else>📋 Copy</span>
+                  </button>
+                </div>
+                <div class="content-text">{{ selectedNote.summary }}</div>
               </div>
               <div v-else class="no-summary-message">
                 <p>No summary available yet. Click the Summary tab to generate one.</p>
+              </div>
+
+              <!-- Structured Data Fields -->
+              <div v-if="getFilteredStructuredData()" class="structured-fields">
+                <div
+                  v-for="(value, key) in getFilteredStructuredData()"
+                  :key="key"
+                  class="structured-field"
+                >
+                  <h4 class="field-label">{{ formatFieldLabel(key) }}</h4>
+
+                  <!-- String array: render as bullet list -->
+                  <ul v-if="isArrayOfStrings(value)" class="field-list">
+                    <li v-for="(item, idx) in value" :key="idx">{{ item }}</li>
+                  </ul>
+
+                  <!-- Object array: render as structured cards -->
+                  <div v-else-if="isArrayOfObjects(value)" class="field-objects">
+                    <div v-for="(obj, idx) in value" :key="idx" class="field-object-card">
+                      <div v-for="(val, objKey) in obj" :key="objKey" class="field-object-row">
+                        <span class="field-object-key">{{ formatFieldLabel(objKey) }}:</span>
+                        <span class="field-object-value">{{ val }}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Simple string: render as paragraph -->
+                  <p v-else class="field-value">{{ value }}</p>
+                </div>
               </div>
             </div>
           </div>
@@ -430,7 +471,9 @@ export default {
       currentView: 'summary', // 'full' or 'summary' - default to summary
       // Grouping functionality
       groupByChannel: true, // Always group by channel
-      expandedChannels: {} // Track which channels are expanded
+      expandedChannels: {}, // Track which channels are expanded
+      // Copy functionality
+      copiedState: null // Track which content was just copied ('full' or 'summary')
     }
   },
   computed: {
@@ -1053,40 +1096,91 @@ export default {
     // Summarization functionality
     async summarizeNote() {
       if (!this.selectedNote || this.summarizing) return
-      
+
       this.summarizing = true
-      
+
       try {
         const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
         const response = await axios.post(`${apiUrl}/summarize`, {
           noteId: this.selectedNote.id,
           content: this.selectedNote.content
         })
-        
-        // Update the selected note with the new summary
+
+        // Update the selected note with the new summary and structured data
         this.selectedNote.summary = response.data.summary
-        
+        this.selectedNote.structuredData = response.data.structuredData
+
         // Update the note in the notes array
         const noteIndex = this.notes.findIndex(n => n.id === this.selectedNote.id)
         if (noteIndex !== -1) {
           this.notes[noteIndex].summary = response.data.summary
+          this.notes[noteIndex].structuredData = response.data.structuredData
         }
-        
+
         // Update in filtered notes if applicable
         if (this.selectedCategory && this.filteredNotes.length > 0) {
           const filteredIndex = this.filteredNotes.findIndex(n => n.id === this.selectedNote.id)
           if (filteredIndex !== -1) {
             this.filteredNotes[filteredIndex].summary = response.data.summary
+            this.filteredNotes[filteredIndex].structuredData = response.data.structuredData
           }
         }
-        
+
         // Don't need to switch view since we're already on summary tab
-        
+
       } catch (error) {
         console.error('Summarization error:', error)
         alert('Sorry, there was an error summarizing the note. Please try again.')
       } finally {
         this.summarizing = false
+      }
+    },
+    // Structured data rendering helpers
+    formatFieldLabel(key) {
+      if (!key) return ''
+      return key
+        .split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ')
+    },
+    getFilteredStructuredData() {
+      if (!this.selectedNote || !this.selectedNote.structuredData) return null
+      const data = { ...this.selectedNote.structuredData }
+      delete data.summary // Summary is displayed separately
+      return Object.keys(data).length > 0 ? data : null
+    },
+    isArrayOfStrings(value) {
+      return Array.isArray(value) && value.length > 0 && typeof value[0] === 'string'
+    },
+    isArrayOfObjects(value) {
+      return Array.isArray(value) && value.length > 0 && typeof value[0] === 'object' && value[0] !== null
+    },
+    // Copy to clipboard functionality
+    async copyToClipboard(text, type) {
+      if (!text) return
+
+      try {
+        await navigator.clipboard.writeText(text)
+        this.copiedState = type
+
+        // Reset copied state after 2 seconds
+        setTimeout(() => {
+          this.copiedState = null
+        }, 2000)
+      } catch (error) {
+        console.error('Failed to copy:', error)
+        // Fallback for older browsers
+        const textarea = document.createElement('textarea')
+        textarea.value = text
+        document.body.appendChild(textarea)
+        textarea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textarea)
+
+        this.copiedState = type
+        setTimeout(() => {
+          this.copiedState = null
+        }, 2000)
       }
     }
   }
@@ -2467,6 +2561,44 @@ export default {
 }
 
 /* Content Styles */
+.content-header {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.copy-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: #f8f9fa;
+  border: 1px solid #d1d1d6;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #495057;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.copy-btn:hover {
+  background: #e9ecef;
+  border-color: #007AFF;
+  color: #007AFF;
+}
+
+.copy-btn.copied {
+  background: #d4edda;
+  border-color: #28a745;
+  color: #28a745;
+}
+
+.content-text {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
 .full-content,
 .summary-text {
   white-space: pre-wrap;
@@ -2525,5 +2657,87 @@ export default {
   margin: 0;
   font-size: 16px;
   font-style: italic;
+}
+
+/* Structured Data Styles */
+.structured-fields {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid #e9ecef;
+}
+
+.structured-field {
+  margin-bottom: 20px;
+}
+
+.structured-field:last-child {
+  margin-bottom: 0;
+}
+
+.field-label {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1c1c1e;
+  text-transform: capitalize;
+}
+
+.field-value {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #495057;
+}
+
+.field-list {
+  margin: 0;
+  padding-left: 20px;
+  list-style-type: disc;
+}
+
+.field-list li {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #495057;
+  margin-bottom: 4px;
+}
+
+.field-list li:last-child {
+  margin-bottom: 0;
+}
+
+.field-objects {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field-object-card {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.field-object-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.field-object-row:last-child {
+  margin-bottom: 0;
+}
+
+.field-object-key {
+  font-weight: 500;
+  color: #6c757d;
+  flex-shrink: 0;
+}
+
+.field-object-value {
+  color: #1c1c1e;
+  word-break: break-word;
 }
 </style>

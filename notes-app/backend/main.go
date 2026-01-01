@@ -27,13 +27,14 @@ import (
 )
 
 type Note struct {
-	ID       primitive.ObjectID     `json:"id" bson:"_id,omitempty"`
-	Title    string                 `json:"title" bson:"title"`
-	Content  string                 `json:"content" bson:"content"`
-	Summary  string                 `json:"summary" bson:"summary"`
-	Category string                 `json:"category" bson:"category"`
-	Created  time.Time              `json:"created" bson:"created"`
-	Metadata map[string]interface{} `json:"metadata" bson:"metadata"`
+	ID             primitive.ObjectID     `json:"id" bson:"_id,omitempty"`
+	Title          string                 `json:"title" bson:"title"`
+	Content        string                 `json:"content" bson:"content"`
+	Summary        string                 `json:"summary" bson:"summary"`
+	StructuredData map[string]interface{} `json:"structuredData" bson:"structured_data"`
+	Category       string                 `json:"category" bson:"category"`
+	Created        time.Time              `json:"created" bson:"created"`
+	Metadata       map[string]interface{} `json:"metadata" bson:"metadata"`
 }
 
 type NoteChunk struct {
@@ -79,7 +80,8 @@ type SummarizeRequest struct {
 }
 
 type SummarizeResponse struct {
-	Summary string `json:"summary"`
+	Summary        string                 `json:"summary"`
+	StructuredData map[string]interface{} `json:"structuredData,omitempty"`
 }
 
 type ProcessingJob struct {
@@ -98,12 +100,12 @@ type NoteAnalysis struct {
 
 // ChannelSettings holds per-channel configuration
 type ChannelSettings struct {
-	ID            primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	ChannelName   string             `json:"channelName" bson:"channel_name"`
-	Platform      string             `json:"platform" bson:"platform"`
-	SummaryMode   string             `json:"summaryMode" bson:"summary_mode"`     // "default" or "custom"
-	CustomPrompt  string             `json:"customPrompt" bson:"custom_prompt"`
-	UpdatedAt     time.Time          `json:"updatedAt" bson:"updated_at"`
+	ID           primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ChannelName  string             `json:"channelName" bson:"channel_name"`
+	Platform     string             `json:"platform" bson:"platform"`
+	PromptText   string             `json:"promptText" bson:"prompt_text"`     // Instructions for the AI
+	PromptSchema string             `json:"promptSchema" bson:"prompt_schema"` // Expected JSON output structure
+	UpdatedAt    time.Time          `json:"updatedAt" bson:"updated_at"`
 }
 
 var (
@@ -251,6 +253,7 @@ func main() {
 	r.GET("/channel-settings", getAllChannelSettings)
 	r.GET("/channel-settings/:channel", getChannelSettings)
 	r.PUT("/channel-settings/:channel", updateChannelSettings)
+	r.DELETE("/channel-settings/:channel", deleteChannelSettings)
 	r.DELETE("/channels/:channel/notes", deleteChannelNotes)
 
 	log.Println("Server starting on :8080")
@@ -645,10 +648,31 @@ func createNote(c *gin.Context) {
 		}
 	}
 
+	// Check for custom prompt settings based on author/channel
+	var customPromptText, customPromptSchema string
+	if author, ok := metadata["author"].(string); ok && author != "" {
+		var settings ChannelSettings
+		err := channelSettingsCollection.FindOne(
+			context.Background(),
+			bson.M{"channel_name": author},
+		).Decode(&settings)
+
+		if err == nil && (settings.PromptText != "" || settings.PromptSchema != "") {
+			customPromptText = settings.PromptText
+			customPromptSchema = settings.PromptSchema
+			log.Printf("Found custom prompt for channel '%s' during note creation", author)
+		}
+	}
+
 	// Use combined analysis if title not provided (single API call for title + category + optional summary)
 	var title, category, summary string
+	var structuredData map[string]interface{}
+
 	if req.Title == "" {
-		analysis, err := analyzeNote(req.Content, isYouTube)
+		// Always get title and category from analyzeNote
+		// Only get summary from analyzeNote if no custom prompt exists
+		useDefaultSummary := customPromptText == "" && customPromptSchema == ""
+		analysis, err := analyzeNote(req.Content, isYouTube && useDefaultSummary)
 		if err != nil {
 			log.Printf("Failed to analyze note: %v", err)
 			title = "Untitled Note"
@@ -656,29 +680,49 @@ func createNote(c *gin.Context) {
 		} else {
 			title = analysis.Title
 			category = analysis.Category
-			summary = analysis.Summary
+			if useDefaultSummary {
+				summary = analysis.Summary
+			}
 			log.Printf("Note analyzed - Title: %s, Category: %s, Summary length: %d", title, category, len(summary))
 		}
 	} else {
 		title = req.Title
 		// If title is provided, we still need category - do a quick analysis
-		analysis, err := analyzeNote(req.Content, isYouTube)
+		useDefaultSummary := customPromptText == "" && customPromptSchema == ""
+		analysis, err := analyzeNote(req.Content, isYouTube && useDefaultSummary)
 		if err != nil {
 			log.Printf("Failed to analyze note for category: %v", err)
 			category = "other"
 		} else {
 			category = analysis.Category
-			summary = analysis.Summary
+			if useDefaultSummary {
+				summary = analysis.Summary
+			}
+		}
+	}
+
+	// If custom prompt exists, generate structured summary with it
+	if customPromptText != "" || customPromptSchema != "" {
+		log.Printf("Generating summary with custom prompt for new note")
+		customSummary, customStructuredData, err := generateStructuredSummary(req.Content, customPromptText, customPromptSchema)
+		if err != nil {
+			log.Printf("Failed to generate custom summary: %v", err)
+			// Fall back to default summary if custom fails
+		} else {
+			summary = customSummary
+			structuredData = customStructuredData
+			log.Printf("Custom summary generated, length: %d, has structured data: %v", len(summary), structuredData != nil)
 		}
 	}
 
 	note := Note{
-		Title:    title,
-		Content:  req.Content,
-		Category: category,
-		Summary:  summary,
-		Created:  time.Now(),
-		Metadata: metadata,
+		Title:          title,
+		Content:        req.Content,
+		Category:       category,
+		Summary:        summary,
+		StructuredData: structuredData,
+		Created:        time.Now(),
+		Metadata:       metadata,
 	}
 
 	result, err := notesCollection.InsertOne(context.TODO(), note)
@@ -1330,8 +1374,8 @@ func summarizeNote(c *gin.Context) {
 		return
 	}
 
-	// Check for custom summary prompt based on channel
-	var customPrompt string
+	// Check for custom prompt and schema based on channel
+	var promptText, promptSchema string
 	if note.Metadata != nil {
 		if author, ok := note.Metadata["author"].(string); ok && author != "" {
 			var settings ChannelSettings
@@ -1340,25 +1384,33 @@ func summarizeNote(c *gin.Context) {
 				bson.M{"channel_name": author},
 			).Decode(&settings)
 
-			if err == nil && settings.SummaryMode == "custom" && settings.CustomPrompt != "" {
-				customPrompt = settings.CustomPrompt
-				log.Printf("Using custom prompt for channel %s", author)
+			if err == nil {
+				promptText = settings.PromptText
+				promptSchema = settings.PromptSchema
+				if promptText != "" || promptSchema != "" {
+					log.Printf("Using custom prompt/schema for channel %s", author)
+				}
 			}
 		}
 	}
 
-	// Generate summary using Gemini
-	summary, err := generateSummaryWithPrompt(req.Content, customPrompt)
+	// Generate structured summary using Gemini
+	summary, structuredData, err := generateStructuredSummary(req.Content, promptText, promptSchema)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate summary"})
 		return
 	}
 
-	// Update the note in the database with the summary
+	// Update the note in the database with summary and structured data
+	updateFields := bson.M{"summary": summary}
+	if structuredData != nil {
+		updateFields["structured_data"] = structuredData
+	}
+
 	_, err = notesCollection.UpdateOne(
 		context.Background(),
 		bson.M{"_id": objID},
-		bson.M{"$set": bson.M{"summary": summary}},
+		bson.M{"$set": updateFields},
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save summary"})
@@ -1366,7 +1418,8 @@ func summarizeNote(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, SummarizeResponse{
-		Summary: summary,
+		Summary:        summary,
+		StructuredData: structuredData,
 	})
 }
 
@@ -1389,17 +1442,19 @@ func summarizeNoteById(c *gin.Context) {
 		return
 	}
 
-	// Parse optional request body for customPrompt override
+	// Parse optional request body for prompt overrides
 	var req struct {
-		CustomPrompt string `json:"customPrompt"`
+		PromptText   string `json:"promptText"`
+		PromptSchema string `json:"promptSchema"`
 	}
 	c.ShouldBindJSON(&req) // Ignore error - body is optional
 
-	// Determine which prompt to use
-	customPrompt := req.CustomPrompt
+	// Determine which prompt/schema to use
+	promptText := req.PromptText
+	promptSchema := req.PromptSchema
 
 	// If no override provided, check channel settings
-	if customPrompt == "" && note.Metadata != nil {
+	if promptText == "" && promptSchema == "" && note.Metadata != nil {
 		if author, ok := note.Metadata["author"].(string); ok && author != "" {
 			var settings ChannelSettings
 			err = channelSettingsCollection.FindOne(
@@ -1407,26 +1462,34 @@ func summarizeNoteById(c *gin.Context) {
 				bson.M{"channel_name": author},
 			).Decode(&settings)
 
-			if err == nil && settings.SummaryMode == "custom" && settings.CustomPrompt != "" {
-				customPrompt = settings.CustomPrompt
-				log.Printf("Using custom prompt for channel %s", author)
+			if err == nil {
+				promptText = settings.PromptText
+				promptSchema = settings.PromptSchema
+				if promptText != "" || promptSchema != "" {
+					log.Printf("Using custom prompt/schema for channel %s", author)
+				}
 			}
 		}
 	}
 
-	// Generate summary using Gemini with the note's content
-	summary, err := generateSummaryWithPrompt(note.Content, customPrompt)
+	// Generate structured summary using Gemini with the note's content
+	summary, structuredData, err := generateStructuredSummary(note.Content, promptText, promptSchema)
 	if err != nil {
 		log.Printf("Failed to generate summary: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate summary"})
 		return
 	}
 
-	// Update the note in the database with the summary
+	// Update the note in the database with summary and structured data
+	updateFields := bson.M{"summary": summary}
+	if structuredData != nil {
+		updateFields["structured_data"] = structuredData
+	}
+
 	_, err = notesCollection.UpdateOne(
 		context.Background(),
 		bson.M{"_id": objID},
-		bson.M{"$set": bson.M{"summary": summary}},
+		bson.M{"$set": updateFields},
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save summary"})
@@ -1434,7 +1497,8 @@ func summarizeNoteById(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, SummarizeResponse{
-		Summary: summary,
+		Summary:        summary,
+		StructuredData: structuredData,
 	})
 }
 
@@ -1487,6 +1551,74 @@ Summary:`, content)
 
 	summary := strings.TrimSpace(string(result.Candidates[0].Content.Parts[0].(genai.Text)))
 	return summary, nil
+}
+
+// generateStructuredSummary generates a summary with structured data based on a schema
+func generateStructuredSummary(content, promptText, promptSchema string) (string, map[string]interface{}, error) {
+	// If no schema provided, fall back to regular summary
+	if promptSchema == "" {
+		summary, err := generateSummaryWithPrompt(content, promptText)
+		if err != nil {
+			return "", nil, err
+		}
+		return summary, nil, nil
+	}
+
+	// Build prompt that requests JSON output matching the schema
+	prompt := fmt.Sprintf(`%s
+
+You MUST respond with valid JSON matching this exact structure:
+%s
+
+IMPORTANT:
+- Return ONLY valid JSON, no markdown formatting, no code blocks
+- The "summary" field must always be included as a string
+- Follow the schema structure exactly
+
+Content to analyze:
+%s`, promptText, promptSchema, content)
+
+	ctx := context.Background()
+	model := genaiClient.GenerativeModel(GENERATION_MODEL)
+	result, err := model.GenerateContent(ctx, genai.Text(prompt))
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to generate structured summary: %w", err)
+	}
+
+	if result == nil || len(result.Candidates) == 0 || result.Candidates[0].Content == nil {
+		return "", nil, fmt.Errorf("no structured summary generated")
+	}
+
+	responseText := strings.TrimSpace(string(result.Candidates[0].Content.Parts[0].(genai.Text)))
+
+	// Clean up response - remove markdown code blocks if present
+	responseText = strings.TrimPrefix(responseText, "```json")
+	responseText = strings.TrimPrefix(responseText, "```")
+	responseText = strings.TrimSuffix(responseText, "```")
+	responseText = strings.TrimSpace(responseText)
+
+	// Parse the JSON response
+	var structuredData map[string]interface{}
+	if err := json.Unmarshal([]byte(responseText), &structuredData); err != nil {
+		log.Printf("Failed to parse structured summary JSON: %s, error: %v", responseText, err)
+		// Fall back to treating the response as plain text summary
+		return responseText, nil, nil
+	}
+
+	// Extract summary field
+	summary := ""
+	if summaryVal, ok := structuredData["summary"]; ok {
+		if summaryStr, ok := summaryVal.(string); ok {
+			summary = summaryStr
+		}
+	}
+
+	// If no summary in structured data, use the full response as summary
+	if summary == "" {
+		summary = responseText
+	}
+
+	return summary, structuredData, nil
 }
 
 func regenerateAllTitles(c *gin.Context) {
@@ -1612,8 +1744,8 @@ func getChannelSettings(c *gin.Context) {
 		// Return default settings if not found
 		c.JSON(http.StatusOK, ChannelSettings{
 			ChannelName:  channelName,
-			SummaryMode:  "default",
-			CustomPrompt: "",
+			PromptText:   "",
+			PromptSchema: "",
 		})
 		return
 	}
@@ -1631,8 +1763,8 @@ func updateChannelSettings(c *gin.Context) {
 
 	var req struct {
 		Platform     string `json:"platform"`
-		SummaryMode  string `json:"summaryMode"`
-		CustomPrompt string `json:"customPrompt"`
+		PromptText   string `json:"promptText"`
+		PromptSchema string `json:"promptSchema"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1640,17 +1772,20 @@ func updateChannelSettings(c *gin.Context) {
 		return
 	}
 
-	// Validate summary mode
-	if req.SummaryMode != "default" && req.SummaryMode != "custom" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid summary mode"})
-		return
+	// Validate promptSchema is valid JSON if provided
+	if req.PromptSchema != "" {
+		var js json.RawMessage
+		if err := json.Unmarshal([]byte(req.PromptSchema), &js); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON in promptSchema"})
+			return
+		}
 	}
 
 	settings := ChannelSettings{
 		ChannelName:  channelName,
 		Platform:     req.Platform,
-		SummaryMode:  req.SummaryMode,
-		CustomPrompt: req.CustomPrompt,
+		PromptText:   req.PromptText,
+		PromptSchema: req.PromptSchema,
 		UpdatedAt:    time.Now(),
 	}
 
@@ -1669,6 +1804,29 @@ func updateChannelSettings(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, settings)
+}
+
+func deleteChannelSettings(c *gin.Context) {
+	channelName := c.Param("channel")
+
+	log.Printf("Deleting channel settings for: %s", channelName)
+
+	result, err := channelSettingsCollection.DeleteOne(
+		context.Background(),
+		bson.M{"channel_name": channelName},
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete settings"})
+		return
+	}
+
+	if result.DeletedCount == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Settings not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Settings deleted"})
 }
 
 func deleteChannelNotes(c *gin.Context) {
