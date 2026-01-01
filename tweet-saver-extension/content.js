@@ -51,6 +51,9 @@ class SocialMediaSaver {
     // UI components (initialized after platform handlers)
     this.actionBarFinder = null;
 
+    // API client (initialized after config is loaded)
+    this.apiClient = null;
+
     this.init();
   }
 
@@ -110,6 +113,10 @@ class SocialMediaSaver {
 
     // Initialize UI components
     this.actionBarFinder = new ActionBarFinder(this.platformHandlers, this.platform);
+
+    // Initialize API client
+    this.apiClient = new NotesApiClient(this.config.apiEndpoint);
+    console.log('Social Media Note Saver: API client initialized');
   }
 
   startObserving() {
@@ -392,47 +399,35 @@ class SocialMediaSaver {
       return result;
     }
 
-    // Complete the save by sending to API
+    // Complete the save by sending to API using ApiClient
     const payload = this.buildPayload(result.postData);
+    const apiResult = await this.apiClient.saveNote(payload);
 
-    try {
-      const response = await fetch(this.config.apiEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
-      });
+    if (!apiResult.success) {
+      console.error('Social Media Note Saver: Failed to save transcript:', apiResult.error);
+      return {
+        success: false,
+        error: apiResult.error
+      };
+    }
 
-      // Handle 409 Conflict (duplicate note) as skipped, not error
-      if (response.status === 409) {
-        console.log('Social Media Note Saver: Note already exists (duplicate):', result.title);
-        return {
-          success: true,
-          skipped: true,
-          videoId: result.videoId,
-          title: result.title
-        };
-      }
-
-      if (!response.ok) {
-        throw new Error(`API request failed: ${response.status} ${response.statusText}`);
-      }
-
-      console.log('Social Media Note Saver: Successfully saved transcript for:', result.title);
+    // Check if note was skipped (duplicate)
+    if (apiResult.skipped) {
+      console.log('Social Media Note Saver: Note already exists (duplicate):', result.title);
       return {
         success: true,
+        skipped: true,
         videoId: result.videoId,
         title: result.title
       };
-
-    } catch (error) {
-      console.error('Social Media Note Saver: Failed to save transcript:', error);
-      return {
-        success: false,
-        error: error.message
-      };
     }
+
+    console.log('Social Media Note Saver: Successfully saved transcript for:', result.title);
+    return {
+      success: true,
+      videoId: result.videoId,
+      title: result.title
+    };
   }
 
 
@@ -545,17 +540,11 @@ class SocialMediaSaver {
       // Build payload from template
       const payload = this.buildPayload(postData);
 
-      // Send to API
-      const response = await fetch(this.config.apiEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
-      });
+      // Send to API using ApiClient
+      const result = await this.apiClient.saveNote(payload);
 
-      if (!response.ok) {
-        throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to save note');
       }
 
       // Show success using SaveButton method (auto-resets after 2 seconds)

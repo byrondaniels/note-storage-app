@@ -37,7 +37,7 @@
         "https://youtube.com/*",
         "https://www.youtube.com/*"
       ],
-      "js": ["utils/config.js", "constants/selectors.js", "constants/config.js", "platforms/base-platform-handler.js", "platforms/twitter-handler.js", "platforms/linkedin-handler.js", "platforms/youtube-handler.js", "ui/save-button.js", "ui/action-bar-finder.js", "content.js"],
+      "js": ["utils/config.js", "constants/selectors.js", "constants/config.js", "platforms/base-platform-handler.js", "platforms/twitter-handler.js", "platforms/linkedin-handler.js", "platforms/youtube-handler.js", "services/api-client.js", "ui/save-button.js", "ui/action-bar-finder.js", "content.js"],
       "css": ["styles.css"],
       "run_at": "document_end"
     },

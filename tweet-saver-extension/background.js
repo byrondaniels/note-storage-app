@@ -1,6 +1,7 @@
 // Social Media Note Saver - Background Script (Service Worker)
 
 import { DEFAULT_CONFIG, StorageService } from './utils/config.js';
+import { NotesApiClient } from './services/api-client.js';
 
 // Handle extension installation
 chrome.runtime.onInstalled.addListener((details) => {
@@ -69,8 +70,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'testAPI') {
-    // Test API endpoint
-    testAPIEndpoint(request.endpoint, request.payload)
+    // Test API endpoint using ApiClient
+    const apiClient = new NotesApiClient(request.endpoint);
+    apiClient.testConnection(request.payload)
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
@@ -89,34 +91,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // Required for async response
   }
 });
-
-async function testAPIEndpoint(endpoint, payload) {
-  try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) {
-      throw new Error(`${response.status}: ${response.statusText}`);
-    }
-
-    const data = await response.text();
-    return {
-      success: true,
-      status: response.status,
-      response: data.substring(0, 200) // Limit response size
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error: error.message
-    };
-  }
-}
 
 // Channel import orchestration functions
 function normalizeChannelUrl(url) {
