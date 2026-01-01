@@ -108,6 +108,7 @@
 <script>
 import axios from 'axios'
 import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
+import { API_URL } from '../utils/api'
 
 export default {
   name: 'SearchNotes',
@@ -135,8 +136,7 @@ export default {
       this.lastSearchQuery = this.searchQuery
 
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        const response = await axios.post(`${apiUrl}/search`, {
+        const response = await axios.post(`${API_URL}/search`, {
           query: this.searchQuery,
           limit: parseInt(this.searchLimit)
         })

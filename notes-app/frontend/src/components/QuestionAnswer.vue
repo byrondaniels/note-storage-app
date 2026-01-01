@@ -96,6 +96,7 @@
 
 <script>
 import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
+import { API_URL } from '../utils/api'
 
 export default {
   name: 'QuestionAnswer',
@@ -119,7 +120,7 @@ export default {
       const question = this.currentQuestion.trim()
 
       try {
-        const response = await fetch('http://localhost:8080/ask', {
+        const response = await fetch(`${API_URL}/ask`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

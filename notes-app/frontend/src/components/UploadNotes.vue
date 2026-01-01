@@ -27,6 +27,7 @@
 
 <script>
 import axios from 'axios'
+import { API_URL } from '../utils/api'
 
 export default {
   name: 'UploadNotes',
@@ -46,8 +47,7 @@ export default {
       this.message = ''
       
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        const response = await axios.post(`${apiUrl}/notes`, {
+        const response = await axios.post(`${API_URL}/notes`, {
           content: this.note.content
         })
         

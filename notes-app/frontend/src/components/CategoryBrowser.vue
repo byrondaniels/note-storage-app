@@ -57,6 +57,7 @@
 
 <script>
 import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
+import { API_URL } from '../utils/api'
 
 export default {
   name: 'CategoryBrowser',
@@ -80,7 +81,7 @@ export default {
     async loadCategories() {
       try {
         this.loading = true
-        const response = await fetch('http://localhost:8080/categories')
+        const response = await fetch(`${API_URL}/categories`)
         if (!response.ok) throw new Error('Failed to fetch categories')
         
         this.categories = await response.json()
@@ -103,8 +104,8 @@ export default {
       try {
         this.selectedCategory = categoryName
         this.notesLoading = true
-        
-        const response = await fetch(`http://localhost:8080/notes/category/${categoryName}`)
+
+        const response = await fetch(`${API_URL}/notes/category/${categoryName}`)
         if (!response.ok) throw new Error('Failed to fetch notes')
         
         this.categoryNotes = await response.json()

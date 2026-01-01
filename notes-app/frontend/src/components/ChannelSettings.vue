@@ -381,8 +381,8 @@
 
 <script>
 import axios from 'axios'
+import { API_URL } from '../utils/api'
 
-const API_URL = process.env.VUE_APP_API_URL || 'http://localhost:8080'
 const EXTENSION_ID = 'koodfochknchgnegkcmcfcidkfgdfgkc'
 
 const DEFAULT_PROMPT_TEXT = `Analyze this content and extract structured information.`

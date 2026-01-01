@@ -444,6 +444,7 @@
 <script>
 import axios from 'axios'
 import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
+import { API_URL } from '../utils/api'
 
 export default {
   name: 'ViewNotes',
@@ -569,10 +570,9 @@ export default {
     async fetchNotes() {
       this.loading = true
       this.error = ''
-      
+
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        const response = await axios.get(`${apiUrl}/notes`)
+        const response = await axios.get(`${API_URL}/notes`)
         this.notes = response.data.sort((a, b) => new Date(b.created) - new Date(a.created))
         
         // Auto-select the first note if available
@@ -611,12 +611,11 @@ export default {
     },
     async performSearch() {
       if (!this.searchQuery.trim()) return
-      
+
       this.isSearching = true
-      
+
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        const response = await axios.post(`${apiUrl}/search`, {
+        const response = await axios.post(`${API_URL}/search`, {
           query: this.searchQuery.trim(),
           limit: 50 // Get more results for search
         })
@@ -655,10 +654,9 @@ export default {
     },
     async loadCategories() {
       this.categoriesLoading = true
-      
+
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        const response = await axios.get(`${apiUrl}/categories`)
+        const response = await axios.get(`${API_URL}/categories`)
         this.categories = response.data || []
         
         // Sort categories: ones with notes first, then alphabetically
@@ -680,12 +678,11 @@ export default {
     async selectCategory(categoryName) {
       // Clear search when selecting a category
       this.clearSearch()
-      
+
       this.selectedCategory = categoryName
-      
+
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        const response = await axios.get(`${apiUrl}/notes/category/${categoryName}`)
+        const response = await axios.get(`${API_URL}/notes/category/${categoryName}`)
         this.filteredNotes = response.data || []
         
         // Auto-select first filtered note if available
@@ -868,27 +865,25 @@ export default {
       }
       
       this.saving = true
-      
+
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        
         if (this.isCreatingNote) {
           // Create new note (title will be auto-generated)
-          const response = await axios.post(`${apiUrl}/notes`, {
+          const response = await axios.post(`${API_URL}/notes`, {
             content: this.editForm.content.trim()
           })
-          
+
           const newNote = response.data
-          
+
           // Add to notes array
           this.notes.unshift(newNote)
-          
+
           // Select the new note
           this.selectedNote = newNote
           this.isCreatingNote = false
         } else {
           // Update existing note (content only, title will be auto-generated)
-          const response = await axios.put(`${apiUrl}/notes/${this.editForm.id}`, {
+          const response = await axios.put(`${API_URL}/notes/${this.editForm.id}`, {
             content: this.editForm.content.trim()
           })
           
@@ -937,12 +932,11 @@ export default {
     },
     async deleteNote() {
       if (!this.noteToDelete) return
-      
+
       this.deleting = true
-      
+
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        await axios.delete(`${apiUrl}/notes/${this.noteToDelete.id}`)
+        await axios.delete(`${API_URL}/notes/${this.noteToDelete.id}`)
         
         // Remove from notes array
         this.notes = this.notes.filter(n => n.id !== this.noteToDelete.id)
@@ -1049,13 +1043,12 @@ export default {
     },
     async sendToAI() {
       if (!this.selectedNote || !this.aiPrompt.trim()) return
-      
+
       this.aiLoading = true
       this.aiResponse = ''
-      
+
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        const response = await axios.post(`${apiUrl}/ai-question`, {
+        const response = await axios.post(`${API_URL}/ai-question`, {
           content: this.selectedNote.content,
           prompt: this.aiPrompt.trim()
         })
@@ -1102,8 +1095,7 @@ export default {
       this.summarizing = true
 
       try {
-        const apiUrl = process.env.VUE_APP_API_URL || 'http://localhost:8080'
-        const response = await axios.post(`${apiUrl}/summarize`, {
+        const response = await axios.post(`${API_URL}/summarize`, {
           noteId: this.selectedNote.id,
           content: this.selectedNote.content
         })
