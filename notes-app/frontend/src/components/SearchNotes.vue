@@ -67,12 +67,12 @@
           </div>
           
           <div class="result-content">
-            <p>{{ truncateContent(result.note.content, 200) }}</p>
+            <p>{{ getPreview(result.note.content, 200) }}</p>
           </div>
           
           <div class="result-footer">
             <span class="result-date">
-              Created: {{ formatDate(result.note.created) }}
+              Created: {{ formatDate(result.note.created, { includeTime: true }) }}
             </span>
             <button @click="expandNote(result.note)" class="expand-button">
               View Full Note
@@ -94,7 +94,7 @@
         </div>
         <div class="modal-body">
           <div class="note-meta">
-            Created: {{ formatDate(expandedNote.created) }}
+            Created: {{ formatDate(expandedNote.created, { includeTime: true }) }}
           </div>
           <div class="note-content">
             {{ expandedNote.content }}
@@ -107,6 +107,7 @@
 
 <script>
 import axios from 'axios'
+import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
 
 export default {
   name: 'SearchNotes',
@@ -123,6 +124,9 @@ export default {
     }
   },
   methods: {
+    formatCategoryName,
+    formatDate,
+    getPreview,
     async performSearch() {
       if (!this.searchQuery.trim()) return
 
@@ -148,30 +152,12 @@ export default {
       }
     },
 
-    truncateContent(content, maxLength) {
-      if (content.length <= maxLength) return content
-      return content.substring(0, maxLength) + '...'
-    },
-
-    formatDate(dateString) {
-      const date = new Date(dateString)
-      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString()
-    },
-
     expandNote(note) {
       this.expandedNote = note
     },
 
     closeModal() {
       this.expandedNote = null
-    },
-
-    formatCategoryName(category) {
-      if (!category) return ''
-      return category
-        .split('-')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ')
     }
   }
 }

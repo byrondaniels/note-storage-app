@@ -38,9 +38,9 @@
              :key="note.id" 
              class="note-card">
           <h4>{{ note.title }}</h4>
-          <p class="note-preview">{{ getPreview(note.content) }}</p>
+          <p class="note-preview">{{ getPreview(note.content, 150) }}</p>
           <div class="note-meta">
-            <span class="note-date">{{ formatDate(note.created) }}</span>
+            <span class="note-date">{{ formatDate(note.created, { includeTime: true }) }}</span>
             <span class="category-badge">{{ formatCategoryName(note.category) }}</span>
           </div>
         </div>
@@ -56,6 +56,8 @@
 </template>
 
 <script>
+import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
+
 export default {
   name: 'CategoryBrowser',
   data() {
@@ -72,6 +74,9 @@ export default {
     await this.loadCategories()
   },
   methods: {
+    formatCategoryName,
+    formatDate,
+    getPreview,
     async loadCategories() {
       try {
         this.loading = true
@@ -114,24 +119,6 @@ export default {
     goBack() {
       this.selectedCategory = null
       this.categoryNotes = []
-    },
-    
-    formatCategoryName(category) {
-      return category
-        .split('-')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ')
-    },
-    
-    getPreview(content) {
-      if (!content) return 'No content'
-      return content.length > 150 ? content.substring(0, 150) + '...' : content
-    },
-    
-    formatDate(dateString) {
-      if (!dateString) return ''
-      const date = new Date(dateString)
-      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
     }
   }
 }

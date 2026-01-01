@@ -62,7 +62,7 @@
                   <h5>{{ source.note.title }}</h5>
                   <span class="relevance-score">{{ Math.round(source.score * 100) }}% relevant</span>
                 </div>
-                <p class="source-content">{{ getPreview(source.note.content) }}</p>
+                <p class="source-content">{{ getPreview(source.note.content, 120) }}</p>
                 <div class="source-meta">
                   <span v-if="source.note.category" class="category-badge">
                     {{ formatCategoryName(source.note.category) }}
@@ -95,6 +95,8 @@
 </template>
 
 <script>
+import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
+
 export default {
   name: 'QuestionAnswer',
   data() {
@@ -106,6 +108,9 @@ export default {
     }
   },
   methods: {
+    formatCategoryName,
+    formatDate,
+    getPreview,
     async askQuestion() {
       if (!this.currentQuestion.trim() || this.loading) return
 
@@ -144,25 +149,6 @@ export default {
       } finally {
         this.loading = false
       }
-    },
-
-    getPreview(content) {
-      if (!content) return 'No content'
-      return content.length > 120 ? content.substring(0, 120) + '...' : content
-    },
-
-    formatDate(dateString) {
-      if (!dateString) return ''
-      const date = new Date(dateString)
-      return date.toLocaleDateString()
-    },
-
-    formatCategoryName(category) {
-      if (!category) return ''
-      return category
-        .split('-')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ')
     }
   }
 }

@@ -443,6 +443,7 @@
 
 <script>
 import axios from 'axios'
+import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
 
 export default {
   name: 'ViewNotes',
@@ -562,6 +563,9 @@ export default {
     document.removeEventListener('keydown', this.handleGlobalKeydown)
   },
   methods: {
+    formatCategoryName,
+    formatDate,
+    getPreview,
     async fetchNotes() {
       this.loading = true
       this.error = ''
@@ -969,21 +973,6 @@ export default {
       } finally {
         this.deleting = false
       }
-    },
-    getPreview(content) {
-      if (!content) return 'No content'
-      return content.length > 80 ? content.substring(0, 80) + '...' : content
-    },
-    formatDate(dateString) {
-      const date = new Date(dateString)
-      return date.toLocaleDateString()
-    },
-    formatCategoryName(category) {
-      if (!category) return ''
-      return category
-        .split('-')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ')
     },
     getSourceInfo(note) {
       if (!note || !note.metadata) return null
