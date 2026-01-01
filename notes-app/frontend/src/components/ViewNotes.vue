@@ -1,11 +1,11 @@
 <template>
   <div class="view-notes">
-    <div v-if="loading" class="loading">
+    <div v-if="api.loading.value" class="loading">
       Loading notes...
     </div>
 
-    <div v-else-if="error" class="error">
-      {{ error }}
+    <div v-else-if="api.error.value" class="error">
+      {{ api.error.value }}
     </div>
 
     <div v-else-if="notes.length === 0" class="no-notes">
@@ -32,7 +32,7 @@
           :selected-category="selectedCategory"
           :search-query.sync="searchQuery"
           :is-searching="isSearching"
-          :loading="loading"
+          :loading="api.loading.value"
           :group-by-channel="groupByChannel"
           @create-note="createNewNote"
           @refresh="refreshNotes"
@@ -144,9 +144,7 @@ export default {
       selectedNote: null,
       selectedCategory: null,
       filteredNotes: [],
-      loading: true,
       categoriesLoading: false,
-      error: '',
       searchQuery: '',
       isSearching: false,
       searchTimeout: null,
