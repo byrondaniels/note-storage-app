@@ -493,74 +493,74 @@ export default {
 .channel-settings {
   max-width: 800px;
   margin: 0 auto;
-  padding: 20px;
+  padding: var(--spacing-xl);
 }
 
 h1 {
   text-align: center;
-  color: #2c3e50;
+  color: var(--color-text-heading);
   margin-bottom: 10px;
 }
 
 .subtitle {
   text-align: center;
-  color: #666;
-  margin-bottom: 30px;
+  color: var(--color-text-muted);
+  margin-bottom: var(--spacing-xxxl);
 }
 
 .channels-section {
-  margin-bottom: 30px;
+  margin-bottom: var(--spacing-xxxl);
 }
 
 .channels-section h2 {
-  font-size: 18px;
-  color: #333;
-  margin: 0 0 8px 0;
+  font-size: var(--font-size-lg);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--spacing-sm) 0;
 }
 
 .section-desc {
-  color: #666;
-  font-size: 14px;
-  margin: 0 0 16px 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--spacing-lg) 0;
 }
 
 .loading {
   text-align: center;
   padding: 40px;
-  color: #666;
+  color: var(--color-text-muted);
 }
 
 .no-channels {
   text-align: center;
-  padding: 60px 20px;
-  background: #f9f9f9;
-  border-radius: 8px;
+  padding: 60px var(--spacing-xl);
+  background: var(--color-bg-light);
+  border-radius: var(--radius-lg);
 }
 
 .no-channels p {
-  margin: 8px 0;
-  color: #666;
+  margin: var(--spacing-sm) 0;
+  color: var(--color-text-muted);
 }
 
 .channels-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--spacing-md);
 }
 
 .warning {
-  color: #dc3545;
-  font-weight: 500;
+  color: var(--color-danger-dark);
+  font-weight: var(--font-weight-medium);
 }
 
 .cancel-btn {
   background: #e0e0e0;
-  color: #333;
+  color: var(--color-text-secondary);
   border: none;
-  padding: 10px 20px;
-  border-radius: 6px;
+  padding: 10px var(--spacing-xl);
+  border-radius: var(--radius-md);
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--font-size-sm);
 }
 
 .cancel-btn:hover {
@@ -568,13 +568,13 @@ h1 {
 }
 
 .delete-btn {
-  background: #dc3545;
+  background: var(--color-danger-dark);
   color: white;
   border: none;
-  padding: 10px 20px;
-  border-radius: 6px;
+  padding: 10px var(--spacing-xl);
+  border-radius: var(--radius-md);
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--font-size-sm);
 }
 
 .delete-btn:hover:not(:disabled) {
@@ -582,7 +582,7 @@ h1 {
 }
 
 .delete-btn:disabled {
-  background: #999;
+  background: var(--color-text-lighter);
   cursor: not-allowed;
 }
 </style>

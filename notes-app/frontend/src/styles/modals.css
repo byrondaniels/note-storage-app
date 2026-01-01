@@ -1,0 +1,219 @@
+/* Unified Modal Styles */
+
+/* Modal Overlay */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: var(--z-index-modal);
+}
+
+/* Modal Content Base */
+.modal-content {
+  background: var(--color-bg-primary);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Modal Size Variants */
+.modal-small {
+  width: 400px;
+}
+
+.modal-medium {
+  width: 600px;
+}
+
+.modal-large {
+  width: 700px;
+  max-height: 85vh;
+}
+
+.modal-xlarge {
+  width: 80vw;
+  max-height: 80vh;
+}
+
+/* Modal Header */
+.modal-header {
+  padding: var(--spacing-xxl) var(--spacing-xxl) var(--spacing-lg) var(--spacing-xxl);
+  border-bottom: 1px solid #f0f0f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--color-bg-primary);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+/* Modal Title Section (with subtitle/badge) */
+.modal-title-section {
+  flex: 1;
+}
+
+.modal-title-section h2 {
+  margin: 0 0 var(--spacing-sm) 0;
+  color: var(--color-text-heading);
+}
+
+/* Modal Close Button */
+.modal-close-btn {
+  background: none;
+  border: none;
+  font-size: var(--font-size-xxl);
+  cursor: pointer;
+  color: var(--color-text-light);
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background-color var(--transition-fast);
+}
+
+.modal-close-btn:hover {
+  background-color: #f0f0f0;
+  color: var(--color-text-primary);
+}
+
+/* Modal Body */
+.modal-body {
+  padding: var(--spacing-xl) var(--spacing-xxl);
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* Modal Footer */
+.modal-footer {
+  padding: var(--spacing-lg) var(--spacing-xxl) var(--spacing-xxl) var(--spacing-xxl);
+  border-top: 1px solid #f0f0f0;
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-md);
+  background: var(--color-bg-primary);
+}
+
+/* Modal Content Styles */
+.modal-description {
+  color: var(--color-secondary);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--spacing-lg);
+  font-style: italic;
+}
+
+/* Note Preview in Delete Modal */
+.modal-note-preview {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: var(--spacing-sm) 0;
+}
+
+/* Warning Text */
+.modal-warning {
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+  margin: var(--spacing-md) 0 0 0;
+}
+
+/* Modal Metadata */
+.modal-meta {
+  color: var(--color-text-light);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--spacing-xl);
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-border-lighter);
+}
+
+/* Modal Content Area */
+.modal-content-text {
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* Modal Loading State */
+.modal-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-xl);
+  color: var(--color-secondary);
+  font-style: italic;
+}
+
+/* Modal Spinner */
+.modal-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--color-bg-hover);
+  border-top: 2px solid var(--color-primary);
+  border-radius: 50%;
+  animation: modal-spin 1s linear infinite;
+}
+
+@keyframes modal-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Modal Response Section (for AI modals) */
+.modal-response-section {
+  margin-top: var(--spacing-xl);
+  padding-top: var(--spacing-xl);
+  border-top: 1px solid var(--color-bg-hover);
+}
+
+.modal-response-section h4 {
+  margin: 0 0 var(--spacing-md) 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.modal-response {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-bg-hover);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-lg);
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .modal-content {
+    margin: var(--spacing-xl);
+    max-width: calc(100vw - 40px);
+  }
+
+  .modal-small,
+  .modal-medium,
+  .modal-large,
+  .modal-xlarge {
+    width: auto;
+  }
+}

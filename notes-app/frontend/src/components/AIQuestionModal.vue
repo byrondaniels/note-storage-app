@@ -107,24 +107,24 @@ export default {
 <style scoped>
 /* AI Modal Specific Styles */
 .ai-modal-description {
-  color: #6c757d;
-  font-size: 14px;
-  margin-bottom: 16px;
+  color: var(--color-secondary);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--spacing-lg);
   font-style: italic;
 }
 
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: var(--spacing-xl);
 }
 
 .form-textarea {
   width: 100%;
-  padding: 12px;
-  border: 1px solid #d1d1d6;
-  border-radius: 8px;
-  font-size: 14px;
+  padding: var(--spacing-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  font-size: var(--font-size-sm);
   font-family: inherit;
-  transition: border-color 0.2s;
+  transition: border-color var(--transition-fast);
   box-sizing: border-box;
   resize: vertical;
   min-height: 200px;
@@ -133,7 +133,7 @@ export default {
 
 .form-textarea:focus {
   outline: none;
-  border-color: #007AFF;
+  border-color: var(--color-primary);
 }
 
 .ai-prompt-textarea {
@@ -142,32 +142,32 @@ export default {
 }
 
 .ai-response-section {
-  margin-top: 20px;
-  padding-top: 20px;
-  border-top: 1px solid #e9ecef;
+  margin-top: var(--spacing-xl);
+  padding-top: var(--spacing-xl);
+  border-top: 1px solid var(--color-bg-hover);
 }
 
 .ai-response-section h4 {
-  margin: 0 0 12px 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #1c1c1e;
+  margin: 0 0 var(--spacing-md) 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
 }
 
 .ai-loading {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 20px;
-  color: #6c757d;
+  gap: var(--spacing-md);
+  padding: var(--spacing-xl);
+  color: var(--color-secondary);
   font-style: italic;
 }
 
 .ai-spinner {
   width: 20px;
   height: 20px;
-  border: 2px solid #e9ecef;
-  border-top: 2px solid #007AFF;
+  border: 2px solid var(--color-bg-hover);
+  border-top: 2px solid var(--color-primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
@@ -178,63 +178,28 @@ export default {
 }
 
 .ai-response {
-  background: #f8f9fa;
-  border: 1px solid #e9ecef;
-  border-radius: 8px;
-  padding: 16px;
-  font-size: 14px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-bg-hover);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-lg);
+  font-size: var(--font-size-sm);
   line-height: 1.6;
-  color: #1c1c1e;
+  color: var(--color-text-primary);
   white-space: pre-wrap;
   word-wrap: break-word;
   max-height: 300px;
   overflow-y: auto;
 }
 
-/* Button Styles */
-.btn {
-  padding: 10px 20px;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-  min-width: 80px;
-}
-
-.btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-primary {
-  background-color: #007AFF;
-  color: white;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background-color: #0056b3;
-}
-
-.btn-secondary {
-  background-color: #f8f9fa;
-  color: #6c757d;
-  border: 1px solid #d1d1d6;
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background-color: #e9ecef;
-  border-color: #adb5bd;
-}
-
+/* Button styles now use global .btn classes from buttons.css */
+/* Only component-specific overrides here */
 .ai-send-btn {
-  background-color: #007AFF !important;
-  border-color: #007AFF !important;
+  background-color: var(--color-primary) !important;
+  border-color: var(--color-primary) !important;
 }
 
 .ai-send-btn:hover:not(:disabled) {
-  background-color: #0056b3 !important;
-  border-color: #0056b3 !important;
+  background-color: var(--color-primary-hover) !important;
+  border-color: var(--color-primary-hover) !important;
 }
 </style>

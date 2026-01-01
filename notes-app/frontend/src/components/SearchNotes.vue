@@ -170,41 +170,41 @@ export default {
 .search-notes {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 20px;
+  padding: var(--spacing-xl);
 }
 
 h1 {
   text-align: center;
-  color: #2c3e50;
-  margin-bottom: 30px;
+  color: var(--color-text-heading);
+  margin-bottom: var(--spacing-xxxl);
 }
 
 .search-form {
-  background: #f9f9f9;
+  background: var(--color-bg-light);
   padding: 25px;
-  border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-  margin-bottom: 30px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  margin-bottom: var(--spacing-xxxl);
 }
 
 .search-input-group {
   display: flex;
   gap: 10px;
-  margin-bottom: 15px;
+  margin-bottom: var(--spacing-lg);
 }
 
 .search-input {
   flex: 1;
-  padding: 12px 15px;
-  border: 2px solid #ddd;
-  border-radius: 6px;
-  font-size: 16px;
-  transition: border-color 0.3s;
+  padding: var(--spacing-md) var(--spacing-lg);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  transition: border-color var(--transition-normal);
 }
 
 .search-input:focus {
   outline: none;
-  border-color: #42b983;
+  border-color: var(--color-success);
 }
 
 .search-input:disabled {
@@ -213,20 +213,20 @@ h1 {
 }
 
 .search-button {
-  background-color: #42b983;
+  background-color: var(--color-success);
   color: white;
-  padding: 12px 24px;
+  padding: var(--spacing-md) var(--spacing-xxl);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  font-size: 16px;
-  font-weight: 500;
-  transition: background-color 0.3s;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  transition: background-color var(--transition-normal);
   min-width: 120px;
 }
 
 .search-button:hover:not(:disabled) {
-  background-color: #369870;
+  background-color: var(--color-success-hover);
 }
 
 .search-button:disabled {
@@ -237,28 +237,28 @@ h1 {
 .search-options {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: var(--spacing-xl);
 }
 
 .search-options label {
-  font-weight: 500;
-  color: #555;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-tertiary);
 }
 
 .limit-select {
-  margin-left: 8px;
+  margin-left: var(--spacing-sm);
   padding: 5px 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
 }
 
 .error-message {
-  background-color: #f8d7da;
-  color: #721c24;
-  padding: 12px;
-  border-radius: 4px;
-  border: 1px solid #f5c6cb;
-  margin-bottom: 20px;
+  background-color: var(--color-danger-light);
+  color: var(--color-danger-text);
+  padding: var(--spacing-md);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-danger-border);
+  margin-bottom: var(--spacing-xl);
   text-align: center;
 }
 
@@ -266,11 +266,11 @@ h1 {
   text-align: center;
   padding: 40px;
   color: #7f8c8d;
-  font-size: 18px;
+  font-size: var(--font-size-lg);
 }
 
 .search-results {
-  margin-top: 30px;
+  margin-top: var(--spacing-xxxl);
 }
 
 .results-header {
@@ -278,8 +278,8 @@ h1 {
 }
 
 .results-header h2 {
-  color: #2c3e50;
-  margin-bottom: 8px;
+  color: var(--color-text-heading);
+  margin-bottom: var(--spacing-sm);
 }
 
 .search-info {
@@ -290,16 +290,16 @@ h1 {
 .results-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: 20px;
+  gap: var(--spacing-xl);
 }
 
 .result-card {
-  background: white;
-  border: 1px solid #e1e8ed;
-  border-radius: 8px;
-  padding: 20px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  transition: transform 0.2s, box-shadow 0.2s;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-xl);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .result-card:hover {
@@ -308,36 +308,36 @@ h1 {
 }
 
 .result-card.high-score {
-  border-left: 4px solid #27ae60;
+  border-left: 4px solid var(--color-success-dark);
 }
 
 .result-card.medium-score {
-  border-left: 4px solid #f39c12;
+  border-left: 4px solid var(--color-warning);
 }
 
 .result-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 15px;
+  margin-bottom: var(--spacing-lg);
 }
 
 .result-title-section {
   flex: 1;
-  margin-right: 15px;
+  margin-right: var(--spacing-lg);
 }
 
 .result-header h3 {
-  margin: 0 0 8px 0;
-  color: #2c3e50;
-  font-size: 18px;
+  margin: 0 0 var(--spacing-sm) 0;
+  color: var(--color-text-heading);
+  font-size: var(--font-size-lg);
 }
 
 .result-score {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .score-label {
@@ -346,15 +346,15 @@ h1 {
 }
 
 .score-value {
-  font-weight: bold;
-  color: #27ae60;
-  font-size: 14px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-success-dark);
+  font-size: var(--font-size-sm);
 }
 
 .result-content p {
-  color: #555;
+  color: var(--color-text-tertiary);
   line-height: 1.6;
-  margin-bottom: 15px;
+  margin-bottom: var(--spacing-lg);
   white-space: pre-wrap;
 }
 
@@ -362,28 +362,28 @@ h1 {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-top: 1px solid #eee;
-  padding-top: 15px;
+  border-top: 1px solid var(--color-border-lighter);
+  padding-top: var(--spacing-lg);
 }
 
 .result-date {
   color: #7f8c8d;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .expand-button {
-  background-color: #3498db;
+  background-color: var(--color-info);
   color: white;
   padding: 6px 12px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 12px;
-  transition: background-color 0.3s;
+  font-size: var(--font-size-xs);
+  transition: background-color var(--transition-normal);
 }
 
 .expand-button:hover {
-  background-color: #2980b9;
+  background-color: var(--color-info-hover);
 }
 
 /* Modal styles - Base styles moved to BaseModal.vue */
@@ -393,20 +393,20 @@ h1 {
 }
 
 .modal-title-section h2 {
-  margin: 0 0 8px 0;
-  color: #2c3e50;
+  margin: 0 0 var(--spacing-sm) 0;
+  color: var(--color-text-heading);
 }
 
 .note-meta {
   color: #7f8c8d;
-  font-size: 14px;
-  margin-bottom: 20px;
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--spacing-xl);
   padding-bottom: 10px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--color-border-lighter);
 }
 
 .note-content {
-  color: #333;
+  color: var(--color-text-secondary);
   line-height: 1.6;
   white-space: pre-wrap;
   word-wrap: break-word;

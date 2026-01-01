@@ -1,0 +1,173 @@
+/* Unified Button Styles */
+
+/* Base Button */
+.btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  min-width: 80px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  text-decoration: none;
+  line-height: 1.5;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Primary Button */
+.btn-primary {
+  background-color: var(--color-primary);
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--color-primary-hover);
+}
+
+/* Secondary Button */
+.btn-secondary {
+  background-color: var(--color-bg-secondary);
+  color: var(--color-secondary);
+  border: 1px solid var(--color-border);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: var(--color-bg-hover);
+  border-color: #adb5bd;
+}
+
+/* Success Button */
+.btn-success {
+  background-color: var(--color-success);
+  color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+  background-color: var(--color-success-hover);
+}
+
+/* Danger Button */
+.btn-danger {
+  background-color: var(--color-danger);
+  color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background-color: var(--color-danger-hover);
+}
+
+/* Warning Button */
+.btn-warning {
+  background-color: var(--color-warning);
+  color: white;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background-color: #e08e0b;
+}
+
+/* Info Button */
+.btn-info {
+  background-color: var(--color-info);
+  color: white;
+}
+
+.btn-info:hover:not(:disabled) {
+  background-color: var(--color-info-hover);
+}
+
+/* Outline Variants */
+.btn-outline-primary {
+  background-color: transparent;
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary);
+}
+
+.btn-outline-primary:hover:not(:disabled) {
+  background-color: var(--color-primary);
+  color: white;
+}
+
+.btn-outline-secondary {
+  background-color: transparent;
+  color: var(--color-secondary);
+  border: 1px solid var(--color-secondary);
+}
+
+.btn-outline-secondary:hover:not(:disabled) {
+  background-color: var(--color-secondary);
+  color: white;
+}
+
+.btn-outline-danger {
+  background-color: transparent;
+  color: var(--color-danger-dark);
+  border: 1px solid var(--color-danger-dark);
+}
+
+.btn-outline-danger:hover:not(:disabled) {
+  background-color: var(--color-danger-dark);
+  color: white;
+}
+
+/* Size Variants */
+.btn-sm {
+  padding: 6px 12px;
+  font-size: var(--font-size-xs);
+  min-width: 60px;
+}
+
+.btn-lg {
+  padding: 12px 24px;
+  font-size: var(--font-size-md);
+  min-width: 120px;
+}
+
+/* Icon Button */
+.btn-icon {
+  padding: 8px;
+  min-width: auto;
+  border-radius: 50%;
+}
+
+/* Block Button */
+.btn-block {
+  width: 100%;
+  display: flex;
+}
+
+/* Link-style Button */
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  padding: 0;
+  min-width: auto;
+  text-decoration: underline;
+}
+
+.btn-link:hover:not(:disabled) {
+  color: var(--color-primary-hover);
+}
+
+/* Back Button (specific style from CategoryBrowser) */
+.btn-back {
+  background: var(--color-secondary);
+  color: white;
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+}
+
+.btn-back:hover:not(:disabled) {
+  background: var(--color-secondary-hover);
+}
