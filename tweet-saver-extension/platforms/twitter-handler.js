@@ -5,10 +5,6 @@
  * Extends BasePlatformHandler to implement platform-specific logic.
  */
 
-import { BasePlatformHandler } from './base-platform-handler.js';
-import { TWITTER_SELECTORS } from '../constants/selectors.js';
-import { PATTERNS } from '../constants/config.js';
-
 class TwitterHandler extends BasePlatformHandler {
   constructor(config) {
     super(config);
@@ -288,10 +284,7 @@ class TwitterHandler extends BasePlatformHandler {
   }
 }
 
-// Export for ES6 modules
-export { TwitterHandler };
-
-// Also make available globally for content scripts (when loaded as regular script)
-if (typeof window !== 'undefined') {
-  window.TwitterHandler = TwitterHandler;
+// Export for use in other modules
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = TwitterHandler;
 }

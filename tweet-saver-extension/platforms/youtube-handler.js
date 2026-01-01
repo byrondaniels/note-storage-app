@@ -7,10 +7,6 @@
  * Note: YouTube transcript extraction requires clicking UI elements and is async.
  */
 
-import { BasePlatformHandler } from './base-platform-handler.js';
-import { YOUTUBE_SELECTORS } from '../constants/selectors.js';
-import { PATTERNS } from '../constants/config.js';
-
 class YouTubeHandler extends BasePlatformHandler {
   constructor(config) {
     super(config);
@@ -522,10 +518,7 @@ class YouTubeHandler extends BasePlatformHandler {
   }
 }
 
-// Export for ES6 modules
-export { YouTubeHandler };
-
-// Also make available globally for content scripts (when loaded as regular script)
-if (typeof window !== 'undefined') {
-  window.YouTubeHandler = YouTubeHandler;
+// Export for use in other modules
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = YouTubeHandler;
 }

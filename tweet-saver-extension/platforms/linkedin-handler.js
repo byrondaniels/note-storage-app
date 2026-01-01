@@ -7,10 +7,6 @@
  * Note: LinkedIn's DOM selectors are particularly fragile and change frequently.
  */
 
-import { BasePlatformHandler } from './base-platform-handler.js';
-import { LINKEDIN_SELECTORS } from '../constants/selectors.js';
-import { PATTERNS, CONTENT_LIMITS } from '../constants/config.js';
-
 class LinkedInHandler extends BasePlatformHandler {
   constructor(config) {
     super(config);
@@ -590,10 +586,7 @@ class LinkedInHandler extends BasePlatformHandler {
   }
 }
 
-// Export for ES6 modules
-export { LinkedInHandler };
-
-// Also make available globally for content scripts (when loaded as regular script)
-if (typeof window !== 'undefined') {
-  window.LinkedInHandler = LinkedInHandler;
+// Export for use in other modules
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = LinkedInHandler;
 }
