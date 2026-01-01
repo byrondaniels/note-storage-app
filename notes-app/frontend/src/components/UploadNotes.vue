@@ -28,9 +28,14 @@
 <script>
 import axios from 'axios'
 import { API_URL } from '../utils/api'
+import { useApi } from '../composables/useApi'
 
 export default {
   name: 'UploadNotes',
+  setup() {
+    const api = useApi()
+    return { api }
+  },
   data() {
     return {
       note: {
@@ -45,19 +50,20 @@ export default {
     async submitNote() {
       this.loading = true
       this.message = ''
-      
+
       try {
-        const response = await axios.post(`${API_URL}/notes`, {
-          content: this.note.content
+        await this.api.request(async () => {
+          const response = await axios.post(`${API_URL}/notes`, {
+            content: this.note.content
+          })
+
+          this.message = `Note saved successfully with title: "${response.data.title}"`
+          this.messageType = 'success'
+          this.note.content = ''
         })
-        
-        this.message = `Note saved successfully with title: "${response.data.title}"`
-        this.messageType = 'success'
-        this.note.content = ''
       } catch (error) {
         this.message = 'Error saving note. Please try again.'
         this.messageType = 'error'
-        console.error('Error:', error)
       } finally {
         this.loading = false
       }
@@ -70,34 +76,34 @@ export default {
 .upload-notes {
   max-width: 600px;
   margin: 0 auto;
-  padding: 20px;
+  padding: var(--spacing-xl);
 }
 
 .note-form {
-  background: #f9f9f9;
-  padding: 30px;
-  border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  background: var(--color-bg-light);
+  padding: var(--spacing-xxxl);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
 }
 
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: var(--spacing-xl);
 }
 
 label {
   display: block;
   margin-bottom: 5px;
-  font-weight: bold;
-  color: #333;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-secondary);
 }
 
 input[type="text"],
 textarea {
   width: 100%;
   padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  font-size: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
   box-sizing: border-box;
 }
 
@@ -107,18 +113,18 @@ textarea {
 }
 
 button {
-  background-color: #42b983;
+  background-color: var(--color-success);
   color: white;
-  padding: 12px 24px;
+  padding: var(--spacing-md) var(--spacing-xxl);
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 16px;
-  transition: background-color 0.3s;
+  font-size: var(--font-size-md);
+  transition: background-color var(--transition-normal);
 }
 
 button:hover:not(:disabled) {
-  background-color: #369870;
+  background-color: var(--color-success-hover);
 }
 
 button:disabled {
@@ -127,34 +133,34 @@ button:disabled {
 }
 
 .message {
-  margin-top: 20px;
+  margin-top: var(--spacing-xl);
   padding: 10px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   text-align: center;
 }
 
 .message.success {
-  background-color: #d4edda;
+  background-color: var(--color-success-light);
   color: #155724;
-  border: 1px solid #c3e6cb;
+  border: 1px solid var(--color-success-border);
 }
 
 .message.error {
-  background-color: #f8d7da;
-  color: #721c24;
-  border: 1px solid #f5c6cb;
+  background-color: var(--color-danger-light);
+  color: var(--color-danger-text);
+  border: 1px solid var(--color-danger-border);
 }
 
 h1 {
   text-align: center;
-  color: #2c3e50;
+  color: var(--color-text-heading);
   margin-bottom: 10px;
 }
 
 .subtitle {
   text-align: center;
-  color: #666;
-  margin-bottom: 30px;
+  color: var(--color-text-muted);
+  margin-bottom: var(--spacing-xxxl);
   font-style: italic;
 }
 </style>

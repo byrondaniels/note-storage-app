@@ -1,0 +1,103 @@
+/* CSS Custom Properties for Notes App */
+:root {
+  /* Primary Colors */
+  --color-primary: #007AFF;
+  --color-primary-hover: #0056b3;
+  --color-primary-light: #e3f2fd;
+
+  /* Secondary Colors */
+  --color-secondary: #6c757d;
+  --color-secondary-hover: #545b62;
+  --color-secondary-light: #f8f9fa;
+
+  /* Success Colors */
+  --color-success: #42b983;
+  --color-success-hover: #369870;
+  --color-success-light: #d4edda;
+  --color-success-dark: #28a745;
+  --color-success-border: #c3e6cb;
+
+  /* Danger Colors */
+  --color-danger: #ff3b30;
+  --color-danger-hover: #d70015;
+  --color-danger-light: #f8d7da;
+  --color-danger-dark: #dc3545;
+  --color-danger-border: #f5c6cb;
+  --color-danger-text: #721c24;
+
+  /* Warning Colors */
+  --color-warning: #f39c12;
+  --color-warning-light: #fff3cd;
+
+  /* Info Colors */
+  --color-info: #3498db;
+  --color-info-hover: #2980b9;
+  --color-info-light: #bbdefb;
+
+  /* Neutral Colors */
+  --color-text-primary: #1c1c1e;
+  --color-text-secondary: #333;
+  --color-text-tertiary: #555;
+  --color-text-muted: #666;
+  --color-text-light: #8e8e93;
+  --color-text-lighter: #999;
+  --color-text-heading: #2c3e50;
+
+  /* Background Colors */
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f8f9fa;
+  --color-bg-tertiary: #f5f5f7;
+  --color-bg-light: #f9f9f9;
+  --color-bg-hover: #e9ecef;
+
+  /* Border Colors */
+  --color-border: #d1d1d6;
+  --color-border-light: #e1e5e9;
+  --color-border-lighter: #eee;
+  --color-border-dark: #dee2e6;
+  --color-border-focus: #007AFF;
+
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 20px;
+  --spacing-xxl: 24px;
+  --spacing-xxxl: 30px;
+
+  /* Border Radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* Font Sizes */
+  --font-size-xs: 12px;
+  --font-size-sm: 14px;
+  --font-size-md: 16px;
+  --font-size-lg: 18px;
+  --font-size-xl: 20px;
+  --font-size-xxl: 24px;
+
+  /* Font Weights */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Transitions */
+  --transition-fast: 0.2s;
+  --transition-normal: 0.3s;
+
+  /* Shadows */
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 4px 20px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.3);
+
+  /* Z-Index */
+  --z-index-modal: 1000;
+  --z-index-dropdown: 100;
+  --z-index-sticky: 50;
+}

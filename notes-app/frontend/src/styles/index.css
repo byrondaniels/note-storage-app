@@ -1,0 +1,7 @@
+/* Global Styles Index */
+/* Import all shared style modules */
+
+@import './variables.css';
+@import './buttons.css';
+@import './forms.css';
+@import './modals.css';

@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
 import App from './App.vue'
+import './styles/index.css'
 import ViewNotes from './components/ViewNotes.vue'
 import QuestionAnswer from './components/QuestionAnswer.vue'
 import ChannelSettings from './components/ChannelSettings.vue'

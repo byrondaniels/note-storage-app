@@ -64,9 +64,7 @@
                 </div>
                 <p class="source-content">{{ getPreview(source.note.content, 120) }}</p>
                 <div class="source-meta">
-                  <span v-if="source.note.category" class="category-badge">
-                    {{ formatCategoryName(source.note.category) }}
-                  </span>
+                  <CategoryBadge :category="source.note.category" />
                   <span class="source-date">{{ formatDate(source.note.created) }}</span>
                 </div>
               </div>
@@ -97,15 +95,26 @@
 <script>
 import { formatCategoryName, formatDate, getPreview } from '../utils/formatters'
 import { API_URL } from '../utils/api'
+import CategoryBadge from './shared/CategoryBadge.vue'
+import { useApi } from '../composables/useApi'
 
 export default {
   name: 'QuestionAnswer',
+  components: {
+    CategoryBadge
+  },
+  setup() {
+    const api = useApi()
+    return {
+      api,
+      loading: api.loading,
+      error: api.error
+    }
+  },
   data() {
     return {
       currentQuestion: '',
-      conversations: [],
-      loading: false,
-      error: null
+      conversations: []
     }
   },
   methods: {
@@ -113,13 +122,11 @@ export default {
     formatDate,
     getPreview,
     async askQuestion() {
-      if (!this.currentQuestion.trim() || this.loading) return
+      if (!this.currentQuestion.trim() || this.loading.value) return
 
-      this.loading = true
-      this.error = null
       const question = this.currentQuestion.trim()
 
-      try {
+      await this.api.request(async () => {
         const response = await fetch(`${API_URL}/ask`, {
           method: 'POST',
           headers: {
@@ -133,7 +140,7 @@ export default {
         }
 
         const data = await response.json()
-        
+
         // Add to conversation history
         this.conversations.unshift({
           question: data.question,
@@ -143,13 +150,7 @@ export default {
 
         // Clear input
         this.currentQuestion = ''
-
-      } catch (error) {
-        console.error('Error asking question:', error)
-        this.error = 'Failed to get an answer. Please try again.'
-      } finally {
-        this.loading = false
-      }
+      })
     }
   }
 }
@@ -164,22 +165,22 @@ export default {
 
 .question-answer h1 {
   text-align: center;
-  color: #333;
+  color: var(--color-text-secondary);
   margin-bottom: 0.5rem;
 }
 
 .subtitle {
   text-align: center;
-  color: #666;
+  color: var(--color-text-muted);
   margin-bottom: 2rem;
   font-size: 1.1rem;
 }
 
 .question-form {
   margin-bottom: 2rem;
-  background: #f8f9fa;
+  background: var(--color-bg-secondary);
   padding: 1.5rem;
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
@@ -191,15 +192,15 @@ export default {
 .question-input {
   flex: 1;
   padding: 1rem 1.5rem;
-  border: 2px solid #e1e5e9;
-  border-radius: 8px;
+  border: 2px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
   font-size: 1rem;
-  transition: border-color 0.3s;
+  transition: border-color var(--transition-normal);
 }
 
 .question-input:focus {
   outline: none;
-  border-color: #007bff;
+  border-color: var(--color-primary);
 }
 
 .question-input:disabled {
@@ -208,19 +209,19 @@ export default {
 }
 
 .ask-button {
-  background: #007bff;
+  background: var(--color-primary);
   color: white;
   border: none;
   padding: 1rem 2rem;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   font-size: 1rem;
   cursor: pointer;
-  transition: background-color 0.3s;
+  transition: background-color var(--transition-normal);
   min-width: 120px;
 }
 
 .ask-button:hover:not(:disabled) {
-  background: #0056b3;
+  background: var(--color-primary-hover);
 }
 
 .ask-button:disabled {
@@ -229,11 +230,11 @@ export default {
 }
 
 .error-message {
-  background-color: #f8d7da;
-  color: #721c24;
+  background-color: var(--color-danger-light);
+  color: var(--color-danger-text);
   padding: 1rem;
-  border-radius: 8px;
-  border: 1px solid #f5c6cb;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-danger-border);
   margin-bottom: 1rem;
   text-align: center;
 }
@@ -247,9 +248,9 @@ export default {
 }
 
 .question-bubble {
-  background: #e3f2fd;
-  border: 1px solid #bbdefb;
-  border-radius: 12px;
+  background: var(--color-primary-light);
+  border: 1px solid var(--color-info-light);
+  border-radius: var(--radius-xl);
   padding: 1.5rem;
   margin-bottom: 1rem;
   margin-left: 2rem;
@@ -259,7 +260,7 @@ export default {
   display: flex;
   align-items: center;
   margin-bottom: 0.5rem;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: #1976d2;
 }
 
@@ -271,13 +272,13 @@ export default {
 .question-bubble p {
   margin: 0;
   font-size: 1.1rem;
-  color: #333;
+  color: var(--color-text-secondary);
 }
 
 .answer-bubble {
   background: #f1f8e9;
   border: 1px solid #c8e6c9;
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   padding: 1.5rem;
   margin-right: 2rem;
 }
@@ -286,7 +287,7 @@ export default {
   display: flex;
   align-items: center;
   margin-bottom: 1rem;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: #388e3c;
 }
 
@@ -298,19 +299,19 @@ export default {
 .answer-text {
   margin: 0 0 1.5rem 0;
   line-height: 1.6;
-  color: #333;
+  color: var(--color-text-secondary);
   font-size: 1.05rem;
 }
 
 .sources-section {
-  border-top: 1px solid #ddd;
+  border-top: 1px solid var(--color-border);
   padding-top: 1rem;
   margin-top: 1rem;
 }
 
 .sources-section h4 {
   margin: 0 0 1rem 0;
-  color: #555;
+  color: var(--color-text-tertiary);
   font-size: 0.95rem;
 }
 
@@ -321,9 +322,9 @@ export default {
 }
 
 .source-card {
-  background: white;
+  background: var(--color-bg-primary);
   border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 1rem;
   font-size: 0.9rem;
 }
@@ -337,22 +338,22 @@ export default {
 
 .source-header h5 {
   margin: 0;
-  color: #333;
+  color: var(--color-text-secondary);
   font-size: 0.95rem;
   flex: 1;
 }
 
 .relevance-score {
-  background: #e3f2fd;
+  background: var(--color-primary-light);
   color: #1976d2;
   padding: 0.2rem 0.5rem;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 0.8rem;
   margin-left: 0.5rem;
 }
 
 .source-content {
-  color: #666;
+  color: var(--color-text-muted);
   margin: 0.5rem 0;
   line-height: 1.4;
 }
@@ -365,21 +366,14 @@ export default {
   font-size: 0.8rem;
 }
 
-.category-badge {
-  background: #e9ecef;
-  color: #495057;
-  padding: 0.2rem 0.5rem;
-  border-radius: 4px;
-}
-
 .source-date {
-  color: #999;
+  color: var(--color-text-lighter);
 }
 
 .empty-state {
   text-align: center;
   padding: 3rem;
-  color: #666;
+  color: var(--color-text-muted);
 }
 
 .empty-icon {
@@ -388,13 +382,13 @@ export default {
 }
 
 .empty-state h3 {
-  color: #333;
+  color: var(--color-text-secondary);
   margin-bottom: 1rem;
 }
 
 .example-questions {
-  background: #f8f9fa;
-  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-lg);
   padding: 1.5rem;
   margin-top: 2rem;
   text-align: left;
@@ -405,7 +399,7 @@ export default {
 
 .example-questions h4 {
   margin: 0 0 1rem 0;
-  color: #333;
+  color: var(--color-text-secondary);
   text-align: center;
 }
 
@@ -416,7 +410,7 @@ export default {
 
 .example-questions li {
   margin-bottom: 0.5rem;
-  color: #555;
+  color: var(--color-text-tertiary);
   font-style: italic;
 }
 </style>
