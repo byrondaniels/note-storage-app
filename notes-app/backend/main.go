@@ -25,6 +25,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"backend/internal/config"
 	"backend/internal/models"
 )
 
@@ -39,74 +40,13 @@ var (
 	wg               sync.WaitGroup
 )
 
-// CATEGORIES defines all available note categories
-var CATEGORIES = []string{
-	// Personal & Life
-	"journal", "reflections", "goals", "ideas", "thoughts", "dreams", "personal-growth",
-	
-	// Health & Fitness
-	"recipes", "workouts", "meal-planning", "health-tips", "medical", "nutrition",
-	
-	// Work & Productivity
-	"meeting-notes", "tasks", "project-ideas", "research", "documentation", "work-thoughts",
-	
-	// Learning & Growth
-	"book-notes", "article-notes", "podcast-transcripts", "courses", "tutorials", "learning",
-	
-	// Relationships & Social
-	"relationship-thoughts", "family", "social-interactions", "networking", "communication",
-	
-	// Financial & Planning
-	"budgeting", "investments", "financial-planning", "expenses", "money-thoughts",
-	
-	// Travel & Adventure
-	"travel-plans", "places-to-visit", "travel-experiences", "adventure-ideas",
-	
-	// Creative & Hobbies
-	"writing-ideas", "art-projects", "creative-inspiration", "hobbies", "entertainment",
-	
-	// Technical & Code
-	"coding-notes", "technical-docs", "troubleshooting", "apis", "programming",
-	
-	// Other
-	"other", "miscellaneous", "random-thoughts",
-}
-
-const (
-	COLLECTION_NAME      = "notes_embeddings"
-	CHUNK_SIZE           = 1000
-	MAX_WORDS            = 10000
-	EMBEDDING_DIM        = 768
-	MIN_RELEVANCE_SCORE  = 0.3 // Filter out results below 30% relevance
-	
-	// Gemini AI Model Configuration
-	EMBEDDING_MODEL      = "text-embedding-004"     // For generating embeddings
-	GENERATION_MODEL     = "gemini-2.5-flash-lite"  // For text generation and classification
-)
-
 func main() {
-	mongoURI := os.Getenv("MONGO_URI")
-	if mongoURI == "" {
-		mongoURI = "mongodb://mongo:27017"
-	}
-
-	qdrantURL := os.Getenv("QDRANT_URL")
-	if qdrantURL == "" {
-		qdrantURL = "qdrant:6334"  // Use gRPC port
-	}
-	
-	// Remove http:// prefix for gRPC connection and switch to gRPC port
-	if strings.HasPrefix(qdrantURL, "http://") {
-		qdrantURL = strings.TrimPrefix(qdrantURL, "http://")
-		qdrantURL = strings.Replace(qdrantURL, ":6333", ":6334", 1)  // Switch to gRPC port
-	}
-
-	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
-	if geminiAPIKey == "" {
+	cfg := config.LoadConfig()
+	if cfg.GeminiAPIKey == "" {
 		log.Fatal("GEMINI_API_KEY environment variable is required")
 	}
 
-	mongoClient, err := mongo.Connect(context.TODO(), options.Client().ApplyURI(mongoURI))
+	mongoClient, err := mongo.Connect(context.TODO(), options.Client().ApplyURI(cfg.MongoURI))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -116,7 +56,7 @@ func main() {
 	chunksCollection = mongoClient.Database("notesdb").Collection("chunks")
 	channelSettingsCollection = mongoClient.Database("notesdb").Collection("channel_settings")
 
-	conn, err := grpc.Dial(qdrantURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.Dial(cfg.QdrantURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatal("Failed to connect to Qdrant:", err)
 	}
@@ -125,7 +65,7 @@ func main() {
 	collectionsClient = pb.NewCollectionsClient(conn)
 	pointsClient = pb.NewPointsClient(conn)
 
-	genaiClient, err = genai.NewClient(context.Background(), option.WithAPIKey(geminiAPIKey))
+	genaiClient, err = genai.NewClient(context.Background(), option.WithAPIKey(cfg.GeminiAPIKey))
 	if err != nil {
 		log.Fatal("Failed to create Gemini client:", err)
 	}
@@ -190,20 +130,20 @@ func initializeQdrant() error {
 
 	collectionExists := false
 	for _, collection := range collections.Collections {
-		if collection.Name == COLLECTION_NAME {
+		if collection.Name == config.COLLECTION_NAME {
 			collectionExists = true
 			break
 		}
 	}
 
 	if !collectionExists {
-		log.Printf("Creating Qdrant collection: %s", COLLECTION_NAME)
+		log.Printf("Creating Qdrant collection: %s", config.COLLECTION_NAME)
 		_, err := collectionsClient.Create(ctx, &pb.CreateCollection{
-			CollectionName: COLLECTION_NAME,
+			CollectionName: config.COLLECTION_NAME,
 			VectorsConfig: &pb.VectorsConfig{
 				Config: &pb.VectorsConfig_Params{
 					Params: &pb.VectorParams{
-						Size:     EMBEDDING_DIM,
+						Size:     config.EMBEDDING_DIM,
 						Distance: pb.Distance_Cosine,
 					},
 				},
@@ -240,7 +180,7 @@ Rules:
 3. If uncertain, use "other"
 4. Be consistent with similar content
 
-Category:`, strings.Join(CATEGORIES, ", "), title, content)
+Category:`, strings.Join(config.CATEGORIES, ", "), title, content)
 
 	ctx := context.Background()
 	model := genaiClient.GenerativeModel(GENERATION_MODEL)
@@ -256,10 +196,8 @@ Category:`, strings.Join(CATEGORIES, ", "), title, content)
 	category := strings.TrimSpace(strings.ToLower(string(result.Candidates[0].Content.Parts[0].(genai.Text))))
 
 	// Validate category is in our list
-	for _, validCategory := range CATEGORIES {
-		if category == validCategory {
-			return category, nil
-		}
+	if config.IsValidCategory(category) {
+		return category, nil
 	}
 
 	// If not found, return "other"
@@ -295,13 +233,13 @@ Content to analyze:
 
 Return this exact JSON structure:
 {"title": "your title here", "category": "category-name", %s}`,
-		strings.Join(CATEGORIES, ", "),
+		strings.Join(config.CATEGORIES, ", "),
 		summaryInstruction,
 		excerpt,
 		summaryField)
 
 	ctx := context.Background()
-	model := genaiClient.GenerativeModel(GENERATION_MODEL)
+	model := genaiClient.GenerativeModel(config.GENERATION_MODEL)
 	result, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		return nil, fmt.Errorf("failed to analyze note: %w", err)
@@ -335,15 +273,8 @@ Return this exact JSON structure:
 	}
 
 	// Validate category
-	validCategory := false
 	analysis.Category = strings.ToLower(strings.TrimSpace(analysis.Category))
-	for _, cat := range CATEGORIES {
-		if analysis.Category == cat {
-			validCategory = true
-			break
-		}
-	}
-	if !validCategory {
+	if !config.IsValidCategory(analysis.Category) {
 		analysis.Category = "other"
 	}
 
@@ -364,12 +295,12 @@ func processNoteJob(job models.ProcessingJob) error {
 
 	words := strings.Fields(fullText)
 
-	if len(words) > MAX_WORDS {
-		words = words[:MAX_WORDS]
+	if len(words) > config.MAX_WORDS {
+		words = words[:config.MAX_WORDS]
 		fullText = strings.Join(words, " ")
 	}
 
-	chunks := chunkText(fullText, CHUNK_SIZE)
+	chunks := chunkText(fullText, config.CHUNK_SIZE)
 
 	for i, chunk := range chunks {
 		chunkDoc := models.NoteChunk{
@@ -464,9 +395,9 @@ func containsSensitiveData(text string) bool {
 
 func generateEmbedding(text string) ([]float32, error) {
 	ctx := context.Background()
-	
-	model := genaiClient.EmbeddingModel(EMBEDDING_MODEL)
-	
+
+	model := genaiClient.EmbeddingModel(config.EMBEDDING_MODEL)
+
 	result, err := model.EmbedContent(ctx, genai.Text(text))
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate embedding: %w", err)
@@ -500,7 +431,7 @@ func storeEmbedding(chunkID, noteID primitive.ObjectID, embedding []float32) err
 	}
 
 	_, err := pointsClient.Upsert(ctx, &pb.UpsertPoints{
-		CollectionName: COLLECTION_NAME,
+		CollectionName: config.COLLECTION_NAME,
 		Points:         []*pb.PointStruct{point},
 	})
 
@@ -846,7 +777,7 @@ func searchNotes(c *gin.Context) {
 	}
 
 	searchResult, err := pointsClient.Search(context.Background(), &pb.SearchPoints{
-		CollectionName: COLLECTION_NAME,
+		CollectionName: config.COLLECTION_NAME,
 		Vector:         queryEmbedding,
 		Limit:          uint64(req.Limit * 2),
 		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
@@ -899,7 +830,7 @@ func searchNotes(c *gin.Context) {
 		score := noteScores[note.ID.Hex()]
 
 		// Only include results above the minimum relevance threshold
-		if score >= MIN_RELEVANCE_SCORE {
+		if score >= config.MIN_RELEVANCE_SCORE {
 			results = append(results, models.SearchResult{
 				Note:  note,
 				Score: score,
@@ -965,7 +896,7 @@ func getCategories(c *gin.Context) {
 		existingCategories[result.Name] = true
 	}
 
-	for _, category := range CATEGORIES {
+	for _, category := range config.CATEGORIES {
 		if !existingCategories[category] {
 			results = append(results, models.CategoryCount{
 				Name:  category,
@@ -981,15 +912,7 @@ func getNotesByCategory(c *gin.Context) {
 	category := c.Param("category")
 
 	// Validate category
-	validCategory := false
-	for _, validCat := range CATEGORIES {
-		if category == validCat {
-			validCategory = true
-			break
-		}
-	}
-
-	if !validCategory {
+	if !config.IsValidCategory(category) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category"})
 		return
 	}
@@ -1058,9 +981,9 @@ func getCategoryStats(c *gin.Context) {
 	}
 
 	response := gin.H{
-		"categories": categoryStats,
-		"total_notes": totalNotes,
-		"total_categories": len(CATEGORIES),
+		"categories":       categoryStats,
+		"total_notes":      totalNotes,
+		"total_categories": len(config.CATEGORIES),
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -1133,7 +1056,7 @@ func answerQuestion(c *gin.Context) {
 	}
 
 	searchResult, err := pointsClient.Search(context.Background(), &pb.SearchPoints{
-		CollectionName: COLLECTION_NAME,
+		CollectionName: config.COLLECTION_NAME,
 		Vector:         queryEmbedding,
 		Limit:          uint64(5), // Get top 5 most relevant notes
 		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
@@ -1212,7 +1135,7 @@ Instructions:
 Answer:`, contextText, question)
 
 	ctx := context.Background()
-	model := genaiClient.GenerativeModel(GENERATION_MODEL)
+	model := genaiClient.GenerativeModel(config.GENERATION_MODEL)
 	result, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		return "", fmt.Errorf("failed to generate answer: %w", err)
@@ -1247,7 +1170,7 @@ Content:
 Title:`, excerpt)
 
 	ctx := context.Background()
-	model := genaiClient.GenerativeModel(GENERATION_MODEL)
+	model := genaiClient.GenerativeModel(config.GENERATION_MODEL)
 	result, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		return "", fmt.Errorf("failed to generate title: %w", err)
@@ -1286,7 +1209,7 @@ Content to analyze:
 
 	// Use Gemini to generate a response
 	ctx := context.Background()
-	model := genaiClient.GenerativeModel(GENERATION_MODEL)
+	model := genaiClient.GenerativeModel(config.GENERATION_MODEL)
 	result, err := model.GenerateContent(ctx, genai.Text(fullPrompt))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate AI response"})
@@ -1495,7 +1418,7 @@ Summary:`, content)
 	}
 
 	ctx := context.Background()
-	model := genaiClient.GenerativeModel(GENERATION_MODEL)
+	model := genaiClient.GenerativeModel(config.GENERATION_MODEL)
 	result, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		return "", fmt.Errorf("failed to generate summary: %w", err)
@@ -1535,7 +1458,7 @@ Content to analyze:
 %s`, promptText, promptSchema, content)
 
 	ctx := context.Background()
-	model := genaiClient.GenerativeModel(GENERATION_MODEL)
+	model := genaiClient.GenerativeModel(config.GENERATION_MODEL)
 	result, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to generate structured summary: %w", err)
