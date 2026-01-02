@@ -307,7 +307,7 @@ func processNoteJob(job models.ProcessingJob) error {
 
 		chunkID := result.InsertedID.(primitive.ObjectID)
 
-		embedding, err := generateEmbedding(chunk)
+		embedding, err := aiClient.GenerateEmbedding(chunk)
 		if err != nil {
 			log.Printf("Error generating embedding: %v", err)
 			continue
@@ -319,23 +319,6 @@ func processNoteJob(job models.ProcessingJob) error {
 	}
 
 	return nil
-}
-
-func generateEmbedding(text string) ([]float32, error) {
-	ctx := context.Background()
-
-	model := aiClient.EmbeddingModel(config.EMBEDDING_MODEL)
-
-	result, err := model.EmbedContent(ctx, genai.Text(text))
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate embedding: %w", err)
-	}
-
-	if result == nil || result.Embedding == nil || len(result.Embedding.Values) == 0 {
-		return nil, fmt.Errorf("no embedding returned")
-	}
-
-	return result.Embedding.Values, nil
 }
 
 func storeEmbedding(chunkID, noteID primitive.ObjectID, embedding []float32) error {
@@ -698,7 +681,7 @@ func searchNotes(c *gin.Context) {
 		req.Limit = 10
 	}
 
-	queryEmbedding, err := generateEmbedding(req.Query)
+	queryEmbedding, err := aiClient.GenerateEmbedding(req.Query)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate embedding for query"})
 		return
@@ -977,7 +960,7 @@ func answerQuestion(c *gin.Context) {
 	}
 
 	// Step 1: Search for relevant notes using semantic search
-	queryEmbedding, err := generateEmbedding(req.Question)
+	queryEmbedding, err := aiClient.GenerateEmbedding(req.Question)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate embedding for question"})
 		return
