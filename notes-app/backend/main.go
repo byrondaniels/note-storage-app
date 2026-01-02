@@ -284,7 +284,7 @@ func processNoteJob(job models.ProcessingJob) error {
 	fullText := job.Title + "\n\n" + job.Content
 
 	// Skip embedding if sensitive data detected
-	if containsSensitiveData(fullText) {
+	if utils.ContainsSensitiveData(fullText) {
 		log.Printf("Skipping embedding for note %s: Sensitive data detected (API keys, passwords, etc.)", job.NoteID.Hex())
 		return nil // Not an error, just skip embedding for security
 	}
@@ -325,53 +325,6 @@ func processNoteJob(job models.ProcessingJob) error {
 	}
 
 	return nil
-}
-
-func containsSensitiveData(text string) bool {
-	// Common patterns for sensitive information
-	sensitivePatterns := []string{
-		// API Keys
-		`(?i)(api[_-]?key|apikey)\s*[:=]\s*[a-zA-Z0-9_-]{10,}`,
-		`sk-[a-zA-Z0-9]{32,}`,                    // OpenAI API keys
-		`AIza[a-zA-Z0-9_-]{35}`,                  // Google API keys  
-		`ya29\.[a-zA-Z0-9_-]+`,                   // Google OAuth tokens
-		`ghp_[a-zA-Z0-9]{36}`,                    // GitHub personal access tokens
-		`gho_[a-zA-Z0-9]{36}`,                    // GitHub OAuth tokens
-		
-		// Passwords
-		`(?i)(password|passwd|pwd)\s*[:=]\s*\S{6,}`,
-		`(?i)(pass|pw)\s*[:=]\s*['"]\S{6,}['"]`,
-		
-		// Secrets and Tokens
-		`(?i)(secret|token|auth)\s*[:=]\s*[a-zA-Z0-9_-]{10,}`,
-		`(?i)bearer\s+[a-zA-Z0-9_-]{10,}`,
-		`(?i)access[_-]?token\s*[:=]\s*[a-zA-Z0-9_-]{10,}`,
-		
-		// Database Connection Strings
-		`(?i)(mongodb|mysql|postgres|redis)://[^\s]+`,
-		`(?i)connection[_-]?string\s*[:=]\s*[^\s;]+`,
-		
-		// Private Keys (basic detection)
-		`-----BEGIN [A-Z\s]+ PRIVATE KEY-----`,
-		`(?i)private[_-]?key\s*[:=]\s*[a-zA-Z0-9+/=]{20,}`,
-		
-		// Common service tokens
-		`xoxb-[a-zA-Z0-9-]+`,                     // Slack bot tokens
-		`xoxp-[a-zA-Z0-9-]+`,                     // Slack user tokens
-	}
-	
-	for _, pattern := range sensitivePatterns {
-		matched, err := regexp.MatchString(pattern, text)
-		if err != nil {
-			log.Printf("Error matching pattern %s: %v", pattern, err)
-			continue
-		}
-		if matched {
-			return true
-		}
-	}
-	
-	return false
 }
 
 func generateEmbedding(text string) ([]float32, error) {
