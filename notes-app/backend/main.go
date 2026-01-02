@@ -1429,7 +1429,6 @@ func summarizeNote(c *gin.Context) {
 	var promptText, promptSchema string
 	if note.Metadata != nil {
 		if author, ok := note.Metadata["author"].(string); ok && author != "" {
-			log.Printf("Looking up channel settings for author: '%s'", author)
 			var settings ChannelSettings
 			err = channelSettingsCollection.FindOne(
 				context.Background(),
@@ -1439,18 +1438,8 @@ func summarizeNote(c *gin.Context) {
 			if err == nil {
 				promptText = settings.PromptText
 				promptSchema = settings.PromptSchema
-				log.Printf("Found channel settings - promptText length: %d, promptSchema length: %d", len(promptText), len(promptSchema))
-				if promptText != "" || promptSchema != "" {
-					log.Printf("Using custom prompt/schema for channel %s", author)
-				}
-			} else {
-				log.Printf("No channel settings found for author '%s': %v", author, err)
 			}
-		} else {
-			log.Printf("No author in note metadata: %+v", note.Metadata)
 		}
-	} else {
-		log.Printf("Note has no metadata")
 	}
 
 	// Generate structured summary using Gemini
@@ -1603,8 +1592,6 @@ Content to summarize:
 Summary:`, content)
 	}
 
-	log.Printf("=== GEMINI SUMMARY PAYLOAD ===\n%s\n=== END PAYLOAD ===", prompt)
-
 	ctx := context.Background()
 	model := genaiClient.GenerativeModel(GENERATION_MODEL)
 	result, err := model.GenerateContent(ctx, genai.Text(prompt))
@@ -1644,8 +1631,6 @@ IMPORTANT:
 
 Content to analyze:
 %s`, promptText, promptSchema, content)
-
-	log.Printf("=== GEMINI SUMMARY PAYLOAD ===\n%s\n=== END PAYLOAD ===", prompt)
 
 	ctx := context.Background()
 	model := genaiClient.GenerativeModel(GENERATION_MODEL)
@@ -1842,8 +1827,6 @@ func updateChannelSettings(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	log.Printf("updateChannelSettings: channel=%s, promptText=%s, promptSchema=%s", channelName, req.PromptText, req.PromptSchema)
 
 	// Validate promptSchema is valid JSON if provided
 	if req.PromptSchema != "" {
