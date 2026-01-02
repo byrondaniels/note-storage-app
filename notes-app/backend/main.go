@@ -24,92 +24,9 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	"backend/internal/models"
 )
-
-type Note struct {
-	ID                primitive.ObjectID     `json:"id" bson:"_id,omitempty"`
-	Title             string                 `json:"title" bson:"title"`
-	Content           string                 `json:"content" bson:"content"`
-	Summary           string                 `json:"summary" bson:"summary"`
-	StructuredData    map[string]interface{} `json:"structuredData" bson:"structured_data"`
-	Category          string                 `json:"category" bson:"category"`
-	Created           time.Time              `json:"created" bson:"created"`
-	SourcePublishedAt *time.Time             `json:"sourcePublishedAt,omitempty" bson:"source_published_at,omitempty"`
-	LastSummarizedAt  *time.Time             `json:"lastSummarizedAt,omitempty" bson:"last_summarized_at,omitempty"`
-	Metadata          map[string]interface{} `json:"metadata" bson:"metadata"`
-}
-
-type NoteChunk struct {
-	ID       primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	NoteID   primitive.ObjectID `json:"note_id" bson:"note_id"`
-	Content  string             `json:"content" bson:"content"`
-	ChunkIdx int                `json:"chunk_idx" bson:"chunk_idx"`
-}
-
-type SearchRequest struct {
-	Query string `json:"query" binding:"required"`
-	Limit int    `json:"limit,omitempty"`
-}
-
-type SearchResult struct {
-	Note  Note    `json:"note"`
-	Score float32 `json:"score"`
-}
-
-type QuestionRequest struct {
-	Question string `json:"question" binding:"required"`
-}
-
-type QuestionResponse struct {
-	Answer     string       `json:"answer"`
-	Sources    []SearchResult `json:"sources"`
-	Question   string       `json:"question"`
-}
-
-type AIQuestionRequest struct {
-	Content string `json:"content" binding:"required"`
-	Prompt  string `json:"prompt" binding:"required"`
-}
-
-type AIQuestionResponse struct {
-	Response string `json:"response"`
-}
-
-type SummarizeRequest struct {
-	NoteId       string `json:"noteId"`
-	Content      string `json:"content"`
-	CustomPrompt string `json:"customPrompt"` // Optional override
-}
-
-type SummarizeResponse struct {
-	Summary        string                 `json:"summary"`
-	StructuredData map[string]interface{} `json:"structuredData,omitempty"`
-}
-
-type ProcessingJob struct {
-	NoteID   primitive.ObjectID
-	Title    string
-	Content  string
-	Metadata map[string]interface{}
-}
-
-// NoteAnalysis holds the combined AI analysis result
-type NoteAnalysis struct {
-	Title    string `json:"title"`
-	Category string `json:"category"`
-	Summary  string `json:"summary"`
-}
-
-// ChannelSettings holds per-channel configuration
-type ChannelSettings struct {
-	ID           primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	ChannelName  string             `json:"channelName" bson:"channel_name"`
-	Platform     string             `json:"platform" bson:"platform"`
-	ChannelUrl   string             `json:"channelUrl" bson:"channel_url"`     // YouTube channel URL for sync
-	PromptText   string             `json:"promptText" bson:"prompt_text"`     // Instructions for the AI
-	PromptSchema string             `json:"promptSchema" bson:"prompt_schema"` // Expected JSON output structure
-	UpdatedAt    time.Time          `json:"updatedAt" bson:"updated_at"`
-}
 
 var (
 	notesCollection          *mongo.Collection
@@ -118,7 +35,7 @@ var (
 	collectionsClient pb.CollectionsClient
 	pointsClient     pb.PointsClient
 	genaiClient      *genai.Client
-	jobQueue         chan ProcessingJob
+	jobQueue         chan models.ProcessingJob
 	wg               sync.WaitGroup
 )
 
@@ -350,7 +267,7 @@ Category:`, strings.Join(CATEGORIES, ", "), title, content)
 }
 
 // analyzeNote performs title generation, classification, and summary in a single API call
-func analyzeNote(content string, includeSummary bool) (*NoteAnalysis, error) {
+func analyzeNote(content string, includeSummary bool) (*models.NoteAnalysis, error) {
 	// Get first 2000 characters for analysis to avoid token limits while keeping enough context
 	excerpt := content
 	if len(content) > 2000 {
@@ -402,7 +319,7 @@ Return this exact JSON structure:
 	responseText = strings.TrimSuffix(responseText, "```")
 	responseText = strings.TrimSpace(responseText)
 
-	var analysis NoteAnalysis
+	var analysis models.NoteAnalysis
 	if err := json.Unmarshal([]byte(responseText), &analysis); err != nil {
 		log.Printf("Failed to parse analysis JSON: %s, error: %v", responseText, err)
 		return nil, fmt.Errorf("failed to parse analysis response: %w", err)
@@ -433,7 +350,7 @@ Return this exact JSON structure:
 	return &analysis, nil
 }
 
-func processNoteJob(job ProcessingJob) error {
+func processNoteJob(job models.ProcessingJob) error {
 	// Note: Title, category, and summary are now generated during createNote()
 	// This job only handles embedding generation
 
@@ -455,7 +372,7 @@ func processNoteJob(job ProcessingJob) error {
 	chunks := chunkText(fullText, CHUNK_SIZE)
 
 	for i, chunk := range chunks {
-		chunkDoc := NoteChunk{
+		chunkDoc := models.NoteChunk{
 			NoteID:   job.NoteID,
 			Content:  chunk,
 			ChunkIdx: i,
@@ -606,14 +523,14 @@ func getNotes(c *gin.Context) {
 	}
 	defer cursor.Close(context.TODO())
 
-	var notes []Note
+	var notes []models.Note
 	if err = cursor.All(context.TODO(), &notes); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	if notes == nil {
-		notes = []Note{}
+		notes = []models.Note{}
 	}
 
 	c.JSON(http.StatusOK, notes)
@@ -636,16 +553,10 @@ func checkNoteExistsByURL(url string) (bool, error) {
 	return count > 0, nil
 }
 
-type CreateNoteRequest struct {
-	Content  string                 `json:"content" binding:"required"`
-	Title    string                 `json:"title,omitempty"`    // Optional, will be auto-generated if empty
-	Metadata map[string]interface{} `json:"metadata"`           // Optional, for social media metadata
-}
-
 func createNote(c *gin.Context) {
 	log.Printf("=== CREATE NOTE FUNCTION CALLED ===")
 
-	var req CreateNoteRequest
+	var req models.CreateNoteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		log.Printf("JSON binding error: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -671,7 +582,7 @@ func createNote(c *gin.Context) {
 	// Check for custom prompt settings based on author/channel
 	var customPromptText, customPromptSchema string
 	if author, ok := metadata["author"].(string); ok && author != "" {
-		var settings ChannelSettings
+		var settings models.ChannelSettings
 		err := channelSettingsCollection.FindOne(
 			context.Background(),
 			bson.M{"channel_name": author},
@@ -752,7 +663,7 @@ func createNote(c *gin.Context) {
 		lastSummarizedAt = &now
 	}
 
-	note := Note{
+	note := models.Note{
 		Title:             title,
 		Content:           req.Content,
 		Category:          category,
@@ -785,7 +696,7 @@ func createNote(c *gin.Context) {
 	note.ID = result.InsertedID.(primitive.ObjectID)
 
 	// Queue job for embedding generation only (title, category, summary already done)
-	job := ProcessingJob{
+	job := models.ProcessingJob{
 		NoteID:   note.ID,
 		Title:    note.Title,
 		Content:  note.Content,
@@ -802,27 +713,23 @@ func createNote(c *gin.Context) {
 	c.JSON(http.StatusCreated, note)
 }
 
-type UpdateNoteRequest struct {
-	Content string `json:"content" binding:"required"`
-}
-
 func updateNote(c *gin.Context) {
 	noteID := c.Param("id")
-	
+
 	objID, err := primitive.ObjectIDFromHex(noteID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid note ID"})
 		return
 	}
-	
-	var req UpdateNoteRequest
+
+	var req models.UpdateNoteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	
+
 	// Find the existing note first
-	var existingNote Note
+	var existingNote models.Note
 	err = notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&existingNote)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
@@ -853,17 +760,17 @@ func updateNote(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update note"})
 		return
 	}
-	
+
 	// Get the updated note
-	var updatedNote Note
+	var updatedNote models.Note
 	err = notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&updatedNote)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve updated note"})
 		return
 	}
-	
+
 	// Queue re-processing job for embeddings and classification
-	job := ProcessingJob{
+	job := models.ProcessingJob{
 		NoteID:   updatedNote.ID,
 		Title:    updatedNote.Title,
 		Content:  updatedNote.Content,
@@ -888,9 +795,9 @@ func deleteNote(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid note ID"})
 		return
 	}
-	
+
 	// Check if note exists
-	var existingNote Note
+	var existingNote models.Note
 	err = notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&existingNote)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
@@ -922,7 +829,7 @@ func deleteNote(c *gin.Context) {
 }
 
 func searchNotes(c *gin.Context) {
-	var req SearchRequest
+	var req models.SearchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -970,7 +877,7 @@ func searchNotes(c *gin.Context) {
 	}
 
 	if len(objectIDs) == 0 {
-		c.JSON(http.StatusOK, []SearchResult{})
+		c.JSON(http.StatusOK, []models.SearchResult{})
 		return
 	}
 
@@ -981,19 +888,19 @@ func searchNotes(c *gin.Context) {
 	}
 	defer cursor.Close(context.Background())
 
-	var notes []Note
+	var notes []models.Note
 	if err = cursor.All(context.Background(), &notes); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode notes"})
 		return
 	}
 
-	var results []SearchResult
+	var results []models.SearchResult
 	for _, note := range notes {
 		score := noteScores[note.ID.Hex()]
-		
+
 		// Only include results above the minimum relevance threshold
 		if score >= MIN_RELEVANCE_SCORE {
-			results = append(results, SearchResult{
+			results = append(results, models.SearchResult{
 				Note:  note,
 				Score: score,
 			})
@@ -1011,11 +918,6 @@ func searchNotes(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, results)
-}
-
-type CategoryCount struct {
-	Name  string `json:"name"`
-	Count int    `json:"count"`
 }
 
 func getCategories(c *gin.Context) {
@@ -1038,7 +940,7 @@ func getCategories(c *gin.Context) {
 	}
 	defer cursor.Close(context.Background())
 
-	var results []CategoryCount
+	var results []models.CategoryCount
 	for cursor.Next(context.Background()) {
 		var result struct {
 			ID    string `bson:"_id"`
@@ -1047,10 +949,10 @@ func getCategories(c *gin.Context) {
 		if err := cursor.Decode(&result); err != nil {
 			continue
 		}
-		
+
 		// Skip empty categories
 		if result.ID != "" {
-			results = append(results, CategoryCount{
+			results = append(results, models.CategoryCount{
 				Name:  result.ID,
 				Count: result.Count,
 			})
@@ -1062,10 +964,10 @@ func getCategories(c *gin.Context) {
 	for _, result := range results {
 		existingCategories[result.Name] = true
 	}
-	
+
 	for _, category := range CATEGORIES {
 		if !existingCategories[category] {
-			results = append(results, CategoryCount{
+			results = append(results, models.CategoryCount{
 				Name:  category,
 				Count: 0,
 			})
@@ -1077,7 +979,7 @@ func getCategories(c *gin.Context) {
 
 func getNotesByCategory(c *gin.Context) {
 	category := c.Param("category")
-	
+
 	// Validate category
 	validCategory := false
 	for _, validCat := range CATEGORIES {
@@ -1086,7 +988,7 @@ func getNotesByCategory(c *gin.Context) {
 			break
 		}
 	}
-	
+
 	if !validCategory {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category"})
 		return
@@ -1101,14 +1003,14 @@ func getNotesByCategory(c *gin.Context) {
 	}
 	defer cursor.Close(context.Background())
 
-	var notes []Note
+	var notes []models.Note
 	if err = cursor.All(context.Background(), &notes); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode notes"})
 		return
 	}
 
 	if notes == nil {
-		notes = []Note{}
+		notes = []models.Note{}
 	}
 
 	c.JSON(http.StatusOK, notes)
@@ -1134,7 +1036,7 @@ func getCategoryStats(c *gin.Context) {
 	}
 	defer cursor.Close(context.Background())
 
-	var categoryStats []CategoryCount
+	var categoryStats []models.CategoryCount
 	totalNotes := 0
 	
 	for cursor.Next(context.Background()) {
@@ -1145,9 +1047,9 @@ func getCategoryStats(c *gin.Context) {
 		if err := cursor.Decode(&result); err != nil {
 			continue
 		}
-		
+
 		if result.ID != "" {
-			categoryStats = append(categoryStats, CategoryCount{
+			categoryStats = append(categoryStats, models.CategoryCount{
 				Name:  result.ID,
 				Count: result.Count,
 			})
@@ -1178,7 +1080,7 @@ func classifyExistingNotes(c *gin.Context) {
 	}
 	defer cursor.Close(context.Background())
 
-	var notes []Note
+	var notes []models.Note
 	if err = cursor.All(context.Background(), &notes); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode notes"})
 		return
@@ -1217,7 +1119,7 @@ func classifyExistingNotes(c *gin.Context) {
 }
 
 func answerQuestion(c *gin.Context) {
-	var req QuestionRequest
+	var req models.QuestionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -1242,7 +1144,7 @@ func answerQuestion(c *gin.Context) {
 	}
 
 	// Step 2: Get relevant notes and prepare context
-	var relevantNotes []SearchResult
+	var relevantNotes []models.SearchResult
 	var contextText strings.Builder
 	noteIDs := make(map[string]bool)
 
@@ -1253,10 +1155,10 @@ func answerQuestion(c *gin.Context) {
 		// Only include highly relevant notes (higher threshold for Q&A)
 		if score >= 0.4 && !noteIDs[noteIDStr] {
 			if objID, err := primitive.ObjectIDFromHex(noteIDStr); err == nil {
-				var note Note
+				var note models.Note
 				err := notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&note)
 				if err == nil {
-					relevantNotes = append(relevantNotes, SearchResult{
+					relevantNotes = append(relevantNotes, models.SearchResult{
 						Note:  note,
 						Score: score,
 					})
@@ -1270,9 +1172,9 @@ func answerQuestion(c *gin.Context) {
 	}
 
 	if len(relevantNotes) == 0 {
-		c.JSON(http.StatusOK, QuestionResponse{
+		c.JSON(http.StatusOK, models.QuestionResponse{
 			Answer:   "I couldn't find any relevant information in your notes to answer that question.",
-			Sources:  []SearchResult{},
+			Sources:  []models.SearchResult{},
 			Question: req.Question,
 		})
 		return
@@ -1285,7 +1187,7 @@ func answerQuestion(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, QuestionResponse{
+	c.JSON(http.StatusOK, models.QuestionResponse{
 		Answer:   answer,
 		Sources:  relevantNotes,
 		Question: req.Question,
@@ -1370,7 +1272,7 @@ Title:`, excerpt)
 }
 
 func askAIAboutNote(c *gin.Context) {
-	var req AIQuestionRequest
+	var req models.AIQuestionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -1397,14 +1299,14 @@ Content to analyze:
 	}
 
 	response := strings.TrimSpace(string(result.Candidates[0].Content.Parts[0].(genai.Text)))
-	
-	c.JSON(http.StatusOK, AIQuestionResponse{
+
+	c.JSON(http.StatusOK, models.AIQuestionResponse{
 		Response: response,
 	})
 }
 
 func summarizeNote(c *gin.Context) {
-	var req SummarizeRequest
+	var req models.SummarizeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -1418,7 +1320,7 @@ func summarizeNote(c *gin.Context) {
 	}
 
 	// Look up the note to get channel/author info
-	var note Note
+	var note models.Note
 	err = notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&note)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Note not found"})
@@ -1429,7 +1331,7 @@ func summarizeNote(c *gin.Context) {
 	var promptText, promptSchema string
 	if note.Metadata != nil {
 		if author, ok := note.Metadata["author"].(string); ok && author != "" {
-			var settings ChannelSettings
+			var settings models.ChannelSettings
 			err = channelSettingsCollection.FindOne(
 				context.Background(),
 				bson.M{"channel_name": author},
@@ -1468,7 +1370,7 @@ func summarizeNote(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, SummarizeResponse{
+	c.JSON(http.StatusOK, models.SummarizeResponse{
 		Summary:        summary,
 		StructuredData: structuredData,
 	})
@@ -1486,7 +1388,7 @@ func summarizeNoteById(c *gin.Context) {
 	}
 
 	// Look up the note
-	var note Note
+	var note models.Note
 	err = notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&note)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Note not found"})
@@ -1507,7 +1409,7 @@ func summarizeNoteById(c *gin.Context) {
 	// If no override provided, check channel settings
 	if promptText == "" && promptSchema == "" && note.Metadata != nil {
 		if author, ok := note.Metadata["author"].(string); ok && author != "" {
-			var settings ChannelSettings
+			var settings models.ChannelSettings
 			err = channelSettingsCollection.FindOne(
 				context.Background(),
 				bson.M{"channel_name": author},
@@ -1550,7 +1452,7 @@ func summarizeNoteById(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, SummarizeResponse{
+	c.JSON(http.StatusOK, models.SummarizeResponse{
 		Summary:        summary,
 		StructuredData: structuredData,
 	})
@@ -1684,7 +1586,7 @@ func regenerateAllTitles(c *gin.Context) {
 	}
 	defer cursor.Close(context.Background())
 
-	var notes []Note
+	var notes []models.Note
 	if err = cursor.All(context.Background(), &notes); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode notes"})
 		return
@@ -1771,7 +1673,7 @@ func getAllChannelSettings(c *gin.Context) {
 	}
 	defer cursor.Close(context.Background())
 
-	var settings []ChannelSettings
+	var settings []models.ChannelSettings
 	if err = cursor.All(context.Background(), &settings); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode settings"})
 		return
@@ -1779,7 +1681,7 @@ func getAllChannelSettings(c *gin.Context) {
 
 	// Return empty array if no settings
 	if settings == nil {
-		settings = []ChannelSettings{}
+		settings = []models.ChannelSettings{}
 	}
 
 	c.JSON(http.StatusOK, settings)
@@ -1788,7 +1690,7 @@ func getAllChannelSettings(c *gin.Context) {
 func getChannelSettings(c *gin.Context) {
 	channelName := c.Param("channel")
 
-	var settings ChannelSettings
+	var settings models.ChannelSettings
 	err := channelSettingsCollection.FindOne(
 		context.Background(),
 		bson.M{"channel_name": channelName},
@@ -1796,7 +1698,7 @@ func getChannelSettings(c *gin.Context) {
 
 	if err == mongo.ErrNoDocuments {
 		// Return default settings if not found
-		c.JSON(http.StatusOK, ChannelSettings{
+		c.JSON(http.StatusOK, models.ChannelSettings{
 			ChannelName:  channelName,
 			ChannelUrl:   "",
 			PromptText:   "",
@@ -1837,7 +1739,7 @@ func updateChannelSettings(c *gin.Context) {
 		}
 	}
 
-	settings := ChannelSettings{
+	settings := models.ChannelSettings{
 		ChannelName:  channelName,
 		Platform:     req.Platform,
 		ChannelUrl:   req.ChannelUrl,
@@ -1902,7 +1804,7 @@ func deleteChannelNotes(c *gin.Context) {
 	}
 	defer cursor.Close(context.Background())
 
-	var notes []Note
+	var notes []models.Note
 	if err = cursor.All(context.Background(), &notes); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode notes"})
 		return
