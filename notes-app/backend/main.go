@@ -27,18 +27,17 @@ import (
 	"backend/internal/ai"
 	"backend/internal/config"
 	"backend/internal/models"
+	"backend/internal/repository"
 	"backend/internal/utils"
 )
 
 var (
-	notesCollection           *mongo.Collection
-	chunksCollection          *mongo.Collection
-	channelSettingsCollection *mongo.Collection
-	collectionsClient         pb.CollectionsClient
-	pointsClient              pb.PointsClient
-	aiClient                  *ai.AIClient
-	jobQueue                  chan models.ProcessingJob
-	wg                        sync.WaitGroup
+	mongoClient       *repository.MongoClient
+	collectionsClient pb.CollectionsClient
+	pointsClient      pb.PointsClient
+	aiClient          *ai.AIClient
+	jobQueue          chan models.ProcessingJob
+	wg                sync.WaitGroup
 )
 
 func main() {
@@ -47,15 +46,12 @@ func main() {
 		log.Fatal("GEMINI_API_KEY environment variable is required")
 	}
 
-	mongoClient, err := mongo.Connect(context.TODO(), options.Client().ApplyURI(cfg.MongoURI))
+	var err error
+	mongoClient, err = repository.NewMongoClient(context.TODO(), cfg.MongoURI, "notesdb")
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Failed to connect to MongoDB:", err)
 	}
-	defer mongoClient.Disconnect(context.TODO())
-
-	notesCollection = mongoClient.Database("notesdb").Collection("notes")
-	chunksCollection = mongoClient.Database("notesdb").Collection("chunks")
-	channelSettingsCollection = mongoClient.Database("notesdb").Collection("channel_settings")
+	defer mongoClient.Close(context.TODO())
 
 	conn, err := grpc.Dial(cfg.QdrantURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -196,7 +192,7 @@ func processNoteJob(job models.ProcessingJob) error {
 			ChunkIdx: i,
 		}
 
-		result, err := chunksCollection.InsertOne(context.Background(), chunkDoc)
+		result, err := mongoClient.ChunksCollection().InsertOne(context.Background(), chunkDoc)
 		if err != nil {
 			log.Printf("Error saving chunk: %v", err)
 			continue
@@ -255,7 +251,7 @@ func getNotes(c *gin.Context) {
 		filter = append(filter, bson.E{Key: "metadata.author", Value: channel})
 	}
 
-	cursor, err := notesCollection.Find(context.TODO(), filter)
+	cursor, err := mongoClient.NotesCollection().Find(context.TODO(), filter)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -281,7 +277,7 @@ func checkNoteExistsByURL(url string) (bool, error) {
 		return false, nil
 	}
 
-	count, err := notesCollection.CountDocuments(
+	count, err := mongoClient.NotesCollection().CountDocuments(
 		context.Background(),
 		bson.M{"metadata.url": url},
 	)
@@ -322,7 +318,7 @@ func createNote(c *gin.Context) {
 	var customPromptText, customPromptSchema string
 	if author, ok := metadata["author"].(string); ok && author != "" {
 		var settings models.ChannelSettings
-		err := channelSettingsCollection.FindOne(
+		err := mongoClient.ChannelSettingsCollection().FindOne(
 			context.Background(),
 			bson.M{"channel_name": author},
 		).Decode(&settings)
@@ -426,7 +422,7 @@ func createNote(c *gin.Context) {
 		}
 	}
 
-	result, err := notesCollection.InsertOne(context.TODO(), note)
+	result, err := mongoClient.NotesCollection().InsertOne(context.TODO(), note)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -469,7 +465,7 @@ func updateNote(c *gin.Context) {
 
 	// Find the existing note first
 	var existingNote models.Note
-	err = notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&existingNote)
+	err = mongoClient.NotesCollection().FindOne(context.Background(), bson.M{"_id": objID}).Decode(&existingNote)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Note not found"})
@@ -494,7 +490,7 @@ func updateNote(c *gin.Context) {
 		},
 	}
 
-	_, err = notesCollection.UpdateOne(context.Background(), bson.M{"_id": objID}, update)
+	_, err = mongoClient.NotesCollection().UpdateOne(context.Background(), bson.M{"_id": objID}, update)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update note"})
 		return
@@ -502,7 +498,7 @@ func updateNote(c *gin.Context) {
 
 	// Get the updated note
 	var updatedNote models.Note
-	err = notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&updatedNote)
+	err = mongoClient.NotesCollection().FindOne(context.Background(), bson.M{"_id": objID}).Decode(&updatedNote)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve updated note"})
 		return
@@ -537,7 +533,7 @@ func deleteNote(c *gin.Context) {
 
 	// Check if note exists
 	var existingNote models.Note
-	err = notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&existingNote)
+	err = mongoClient.NotesCollection().FindOne(context.Background(), bson.M{"_id": objID}).Decode(&existingNote)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Note not found"})
@@ -548,14 +544,14 @@ func deleteNote(c *gin.Context) {
 	}
 
 	// Delete note from MongoDB
-	_, err = notesCollection.DeleteOne(context.Background(), bson.M{"_id": objID})
+	_, err = mongoClient.NotesCollection().DeleteOne(context.Background(), bson.M{"_id": objID})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete note"})
 		return
 	}
 
 	// Delete associated chunks from MongoDB
-	_, err = chunksCollection.DeleteMany(context.Background(), bson.M{"note_id": objID})
+	_, err = mongoClient.ChunksCollection().DeleteMany(context.Background(), bson.M{"note_id": objID})
 	if err != nil {
 		log.Printf("Failed to delete chunks for note %s: %v", noteID, err)
 		// Don't fail the request, just log the error
@@ -620,7 +616,7 @@ func searchNotes(c *gin.Context) {
 		return
 	}
 
-	cursor, err := notesCollection.Find(context.Background(), bson.M{"_id": bson.M{"$in": objectIDs}})
+	cursor, err := mongoClient.NotesCollection().Find(context.Background(), bson.M{"_id": bson.M{"$in": objectIDs}})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch notes"})
 		return
@@ -672,7 +668,7 @@ func getCategories(c *gin.Context) {
 		},
 	}
 
-	cursor, err := notesCollection.Aggregate(context.Background(), pipeline)
+	cursor, err := mongoClient.NotesCollection().Aggregate(context.Background(), pipeline)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to aggregate categories"})
 		return
@@ -727,7 +723,7 @@ func getNotesByCategory(c *gin.Context) {
 
 	// Sort by created date (newest first)
 	opts := options.Find().SetSort(bson.M{"created": -1})
-	cursor, err := notesCollection.Find(context.Background(), bson.M{"category": category}, opts)
+	cursor, err := mongoClient.NotesCollection().Find(context.Background(), bson.M{"category": category}, opts)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch notes"})
 		return
@@ -760,7 +756,7 @@ func getCategoryStats(c *gin.Context) {
 		},
 	}
 
-	cursor, err := notesCollection.Aggregate(context.Background(), pipeline)
+	cursor, err := mongoClient.NotesCollection().Aggregate(context.Background(), pipeline)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get category stats"})
 		return
@@ -799,7 +795,7 @@ func getCategoryStats(c *gin.Context) {
 
 func classifyExistingNotes(c *gin.Context) {
 	// Find notes without category or with empty category
-	cursor, err := notesCollection.Find(context.Background(), bson.M{
+	cursor, err := mongoClient.NotesCollection().Find(context.Background(), bson.M{
 		"$or": []bson.M{
 			{"category": bson.M{"$exists": false}},
 			{"category": ""},
@@ -828,7 +824,7 @@ func classifyExistingNotes(c *gin.Context) {
 			errors++
 		}
 
-		_, err = notesCollection.UpdateOne(
+		_, err = mongoClient.NotesCollection().UpdateOne(
 			context.Background(),
 			bson.M{"_id": note.ID},
 			bson.M{"$set": bson.M{"category": category}},
@@ -887,7 +883,7 @@ func answerQuestion(c *gin.Context) {
 		if score >= 0.4 && !noteIDs[noteIDStr] {
 			if objID, err := primitive.ObjectIDFromHex(noteIDStr); err == nil {
 				var note models.Note
-				err := notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&note)
+				err := mongoClient.NotesCollection().FindOne(context.Background(), bson.M{"_id": objID}).Decode(&note)
 				if err == nil {
 					relevantNotes = append(relevantNotes, models.SearchResult{
 						Note:  note,
@@ -974,7 +970,7 @@ func summarizeNote(c *gin.Context) {
 
 	// Look up the note to get channel/author info
 	var note models.Note
-	err = notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&note)
+	err = mongoClient.NotesCollection().FindOne(context.Background(), bson.M{"_id": objID}).Decode(&note)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Note not found"})
 		return
@@ -985,7 +981,7 @@ func summarizeNote(c *gin.Context) {
 	if note.Metadata != nil {
 		if author, ok := note.Metadata["author"].(string); ok && author != "" {
 			var settings models.ChannelSettings
-			err = channelSettingsCollection.FindOne(
+			err = mongoClient.ChannelSettingsCollection().FindOne(
 				context.Background(),
 				bson.M{"channel_name": author},
 			).Decode(&settings)
@@ -1013,7 +1009,7 @@ func summarizeNote(c *gin.Context) {
 		updateFields["structured_data"] = structuredData
 	}
 
-	_, err = notesCollection.UpdateOne(
+	_, err = mongoClient.NotesCollection().UpdateOne(
 		context.Background(),
 		bson.M{"_id": objID},
 		bson.M{"$set": updateFields},
@@ -1042,7 +1038,7 @@ func summarizeNoteById(c *gin.Context) {
 
 	// Look up the note
 	var note models.Note
-	err = notesCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&note)
+	err = mongoClient.NotesCollection().FindOne(context.Background(), bson.M{"_id": objID}).Decode(&note)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Note not found"})
 		return
@@ -1063,7 +1059,7 @@ func summarizeNoteById(c *gin.Context) {
 	if promptText == "" && promptSchema == "" && note.Metadata != nil {
 		if author, ok := note.Metadata["author"].(string); ok && author != "" {
 			var settings models.ChannelSettings
-			err = channelSettingsCollection.FindOne(
+			err = mongoClient.ChannelSettingsCollection().FindOne(
 				context.Background(),
 				bson.M{"channel_name": author},
 			).Decode(&settings)
@@ -1095,7 +1091,7 @@ func summarizeNoteById(c *gin.Context) {
 		updateFields["structured_data"] = structuredData
 	}
 
-	_, err = notesCollection.UpdateOne(
+	_, err = mongoClient.NotesCollection().UpdateOne(
 		context.Background(),
 		bson.M{"_id": objID},
 		bson.M{"$set": updateFields},
@@ -1113,7 +1109,7 @@ func summarizeNoteById(c *gin.Context) {
 
 func regenerateAllTitles(c *gin.Context) {
 	// Find all notes
-	cursor, err := notesCollection.Find(context.Background(), bson.M{})
+	cursor, err := mongoClient.NotesCollection().Find(context.Background(), bson.M{})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find notes"})
 		return
@@ -1137,7 +1133,7 @@ func regenerateAllTitles(c *gin.Context) {
 			continue
 		}
 
-		_, err = notesCollection.UpdateOne(
+		_, err = mongoClient.NotesCollection().UpdateOne(
 			context.Background(),
 			bson.M{"_id": note.ID},
 			bson.M{"$set": bson.M{"title": newTitle}},
@@ -1173,7 +1169,7 @@ func getChannelsWithNotes(c *gin.Context) {
 		{{Key: "$sort", Value: bson.M{"noteCount": -1}}},
 	}
 
-	cursor, err := notesCollection.Aggregate(context.Background(), pipeline)
+	cursor, err := mongoClient.NotesCollection().Aggregate(context.Background(), pipeline)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get channels"})
 		return
@@ -1200,7 +1196,7 @@ func getChannelsWithNotes(c *gin.Context) {
 }
 
 func getAllChannelSettings(c *gin.Context) {
-	cursor, err := channelSettingsCollection.Find(context.Background(), bson.M{})
+	cursor, err := mongoClient.ChannelSettingsCollection().Find(context.Background(), bson.M{})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get channel settings"})
 		return
@@ -1225,7 +1221,7 @@ func getChannelSettings(c *gin.Context) {
 	channelName := c.Param("channel")
 
 	var settings models.ChannelSettings
-	err := channelSettingsCollection.FindOne(
+	err := mongoClient.ChannelSettingsCollection().FindOne(
 		context.Background(),
 		bson.M{"channel_name": channelName},
 	).Decode(&settings)
@@ -1284,7 +1280,7 @@ func updateChannelSettings(c *gin.Context) {
 
 	// Upsert the settings
 	opts := options.Update().SetUpsert(true)
-	_, err := channelSettingsCollection.UpdateOne(
+	_, err := mongoClient.ChannelSettingsCollection().UpdateOne(
 		context.Background(),
 		bson.M{"channel_name": channelName},
 		bson.M{"$set": settings},
@@ -1304,7 +1300,7 @@ func deleteChannelSettings(c *gin.Context) {
 
 	log.Printf("Deleting channel settings for: %s", channelName)
 
-	result, err := channelSettingsCollection.DeleteOne(
+	result, err := mongoClient.ChannelSettingsCollection().DeleteOne(
 		context.Background(),
 		bson.M{"channel_name": channelName},
 	)
@@ -1328,7 +1324,7 @@ func deleteChannelNotes(c *gin.Context) {
 	log.Printf("Deleting all notes for channel: %s", channelName)
 
 	// Find all notes for this channel
-	cursor, err := notesCollection.Find(
+	cursor, err := mongoClient.NotesCollection().Find(
 		context.Background(),
 		bson.M{"metadata.author": channelName},
 	)
@@ -1350,7 +1346,7 @@ func deleteChannelNotes(c *gin.Context) {
 	// Delete each note and its associated chunks/embeddings
 	for _, note := range notes {
 		// Delete chunks for this note
-		chunkResult, err := chunksCollection.DeleteMany(
+		chunkResult, err := mongoClient.ChunksCollection().DeleteMany(
 			context.Background(),
 			bson.M{"note_id": note.ID},
 		)
@@ -1363,7 +1359,7 @@ func deleteChannelNotes(c *gin.Context) {
 		// TODO: Delete embeddings from Qdrant (would need to query by note_id in payload)
 
 		// Delete the note
-		_, err = notesCollection.DeleteOne(
+		_, err = mongoClient.NotesCollection().DeleteOne(
 			context.Background(),
 			bson.M{"_id": note.ID},
 		)
