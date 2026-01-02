@@ -27,6 +27,7 @@ import (
 
 	"backend/internal/config"
 	"backend/internal/models"
+	"backend/internal/utils"
 )
 
 var (
@@ -249,13 +250,8 @@ Return this exact JSON structure:
 		return nil, fmt.Errorf("no analysis result returned")
 	}
 
-	responseText := strings.TrimSpace(string(result.Candidates[0].Content.Parts[0].(genai.Text)))
-
-	// Clean up response - remove markdown code blocks if present
-	responseText = strings.TrimPrefix(responseText, "```json")
-	responseText = strings.TrimPrefix(responseText, "```")
-	responseText = strings.TrimSuffix(responseText, "```")
-	responseText = strings.TrimSpace(responseText)
+	responseText := string(result.Candidates[0].Content.Parts[0].(genai.Text))
+	responseText = utils.CleanMarkdownCodeBlocks(responseText)
 
 	var analysis models.NoteAnalysis
 	if err := json.Unmarshal([]byte(responseText), &analysis); err != nil {
@@ -300,7 +296,7 @@ func processNoteJob(job models.ProcessingJob) error {
 		fullText = strings.Join(words, " ")
 	}
 
-	chunks := chunkText(fullText, config.CHUNK_SIZE)
+	chunks := utils.ChunkText(fullText, config.CHUNK_SIZE)
 
 	for i, chunk := range chunks {
 		chunkDoc := models.NoteChunk{
@@ -329,21 +325,6 @@ func processNoteJob(job models.ProcessingJob) error {
 	}
 
 	return nil
-}
-
-func chunkText(text string, chunkSize int) []string {
-	words := strings.Fields(text)
-	var chunks []string
-	
-	for i := 0; i < len(words); i += chunkSize {
-		end := i + chunkSize
-		if end > len(words) {
-			end = len(words)
-		}
-		chunks = append(chunks, strings.Join(words[i:end], " "))
-	}
-	
-	return chunks
 }
 
 func containsSensitiveData(text string) bool {
@@ -1468,13 +1449,8 @@ Content to analyze:
 		return "", nil, fmt.Errorf("no structured summary generated")
 	}
 
-	responseText := strings.TrimSpace(string(result.Candidates[0].Content.Parts[0].(genai.Text)))
-
-	// Clean up response - remove markdown code blocks if present
-	responseText = strings.TrimPrefix(responseText, "```json")
-	responseText = strings.TrimPrefix(responseText, "```")
-	responseText = strings.TrimSuffix(responseText, "```")
-	responseText = strings.TrimSpace(responseText)
+	responseText := string(result.Candidates[0].Content.Parts[0].(genai.Text))
+	responseText = utils.CleanMarkdownCodeBlocks(responseText)
 
 	// Parse the JSON response
 	var structuredData map[string]interface{}
