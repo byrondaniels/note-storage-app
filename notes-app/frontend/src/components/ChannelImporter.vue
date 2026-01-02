@@ -23,6 +23,7 @@
         <div class="form-group video-limit">
           <label for="videoLimit">Videos:</label>
           <select id="videoLimit" v-model="videoLimit" :disabled="importing">
+            <option value="1">1</option>
             <option value="5">5</option>
             <option value="10">10</option>
             <option value="20">20</option>

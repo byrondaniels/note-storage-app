@@ -1438,9 +1438,6 @@ func summarizeNote(c *gin.Context) {
 			if err == nil {
 				promptText = settings.PromptText
 				promptSchema = settings.PromptSchema
-				if promptText != "" || promptSchema != "" {
-					log.Printf("Using custom prompt/schema for channel %s", author)
-				}
 			}
 		}
 	}

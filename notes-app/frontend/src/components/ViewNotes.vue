@@ -57,12 +57,14 @@
             :note="selectedNote"
             :current-view.sync="currentView"
             :summarizing="summarizing"
+            :summarize-error="summarizeError"
             :copied-state.sync="copiedState"
             @open-ai-modal="openAIModal"
             @delete="confirmDeleteNote(selectedNote)"
             @summarize="summarizeNote"
             @update:currentView="currentView = $event"
             @update:copiedState="copiedState = $event"
+            @clear-error="summarizeError = null"
           />
 
           <!-- Edit Mode or New Note Mode -->
@@ -168,6 +170,7 @@ export default {
       aiLoading: false,
       // Summarization functionality
       summarizing: false,
+      summarizeError: null,
       currentView: 'summary',
       // Grouping functionality
       groupByChannel: true,
@@ -229,6 +232,7 @@ export default {
     selectNote(note) {
       this.selectedNote = note
       this.currentView = 'full'
+      this.summarizeError = null
     },
     handleSearchInput(value) {
       this.searchQuery = value
@@ -567,37 +571,40 @@ export default {
       if (!this.selectedNote || this.summarizing) return
 
       this.summarizing = true
+      this.summarizeError = null
 
       try {
-        await this.api.request(async () => {
-          const response = await axios.post(`${API_URL}/summarize`, {
-            noteId: this.selectedNote.id,
-            content: this.selectedNote.content
-          })
-
-          const now = new Date().toISOString()
-          this.selectedNote.summary = response.data.summary
-          this.selectedNote.structuredData = response.data.structuredData
-          this.selectedNote.lastSummarizedAt = now
-
-          const noteIndex = this.notes.findIndex(n => n.id === this.selectedNote.id)
-          if (noteIndex !== -1) {
-            this.notes[noteIndex].summary = response.data.summary
-            this.notes[noteIndex].structuredData = response.data.structuredData
-            this.notes[noteIndex].lastSummarizedAt = now
-          }
-
-          if (this.selectedCategory && this.filteredNotes.length > 0) {
-            const filteredIndex = this.filteredNotes.findIndex(n => n.id === this.selectedNote.id)
-            if (filteredIndex !== -1) {
-              this.filteredNotes[filteredIndex].summary = response.data.summary
-              this.filteredNotes[filteredIndex].structuredData = response.data.structuredData
-              this.filteredNotes[filteredIndex].lastSummarizedAt = now
-            }
-          }
+        const response = await axios.post(`${API_URL}/summarize`, {
+          noteId: this.selectedNote.id,
+          content: this.selectedNote.content
         })
+
+        const summary = response.data?.summary || ''
+        const structuredData = response.data?.structuredData || null
+        const now = new Date().toISOString()
+
+        this.selectedNote.summary = summary
+        this.selectedNote.structuredData = structuredData
+        this.selectedNote.lastSummarizedAt = now
+
+        const noteIndex = this.notes.findIndex(n => n.id === this.selectedNote.id)
+        if (noteIndex !== -1) {
+          this.notes[noteIndex].summary = summary
+          this.notes[noteIndex].structuredData = structuredData
+          this.notes[noteIndex].lastSummarizedAt = now
+        }
+
+        if (this.selectedCategory && this.filteredNotes.length > 0) {
+          const filteredIndex = this.filteredNotes.findIndex(n => n.id === this.selectedNote.id)
+          if (filteredIndex !== -1) {
+            this.filteredNotes[filteredIndex].summary = summary
+            this.filteredNotes[filteredIndex].structuredData = structuredData
+            this.filteredNotes[filteredIndex].lastSummarizedAt = now
+          }
+        }
       } catch (error) {
-        alert('Sorry, there was an error summarizing the note. Please try again.')
+        console.error('Summarization failed:', error)
+        this.summarizeError = error.response?.data?.error || error.message || 'Failed to generate summary'
       } finally {
         this.summarizing = false
       }

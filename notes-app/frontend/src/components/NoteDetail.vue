@@ -87,6 +87,11 @@
           <div class="summary-spinner"></div>
           <p>Generating summary...</p>
         </div>
+        <div v-else-if="summarizeError" class="summary-error">
+          <p class="error-title">Failed to generate summary</p>
+          <p class="error-message">{{ summarizeError }}</p>
+          <button @click="$emit('clear-error'); $emit('summarize')" class="retry-btn">Try Again</button>
+        </div>
         <div v-else-if="note.summary" class="summary-text">
           <div class="content-header">
             <button @click="copyToClipboard(note.summary, 'summary')" class="copy-btn" :class="{ 'copied': copiedState === 'summary' }">
@@ -97,7 +102,8 @@
           <div class="content-text">{{ note.summary }}</div>
         </div>
         <div v-else class="no-summary-message">
-          <p>No summary available yet. Click the Summary tab to generate one.</p>
+          <p>No summary available</p>
+          <button @click="$emit('summarize')" class="generate-btn">Generate Summary</button>
         </div>
 
         <!-- Structured Data Fields -->
@@ -155,6 +161,10 @@ export default {
       type: Boolean,
       default: false
     },
+    summarizeError: {
+      type: String,
+      default: null
+    },
     copiedState: {
       type: String,
       default: null
@@ -163,12 +173,7 @@ export default {
   methods: {
     formatDate,
     handleSummaryTabClick() {
-      if (this.note.summary) {
-        this.$emit('update:currentView', 'summary')
-      } else {
-        this.$emit('update:currentView', 'summary')
-        this.$emit('summarize')
-      }
+      this.$emit('update:currentView', 'summary')
     },
     async copyToClipboard(text, type) {
       if (!text) return
@@ -537,17 +542,76 @@ export default {
 
 .no-summary-message {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 60px 20px;
   color: #6c757d;
   text-align: center;
+  gap: 16px;
 }
 
 .no-summary-message p {
   margin: 0;
   font-size: 16px;
-  font-style: italic;
+}
+
+.no-summary-message .generate-btn {
+  background: #007AFF;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.no-summary-message .generate-btn:hover {
+  background: #0056b3;
+}
+
+.summary-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  background: #fff5f5;
+  border: 1px solid #fed7d7;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.summary-error .error-title {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #c53030;
+}
+
+.summary-error .error-message {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  color: #742a2a;
+  max-width: 400px;
+}
+
+.summary-error .retry-btn {
+  background: #c53030;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.summary-error .retry-btn:hover {
+  background: #9b2c2c;
 }
 
 /* Structured Data */
