@@ -21,24 +21,24 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"backend/internal/ai"
 	"backend/internal/config"
 	"backend/internal/models"
 	"backend/internal/utils"
 )
 
 var (
-	notesCollection          *mongo.Collection
-	chunksCollection         *mongo.Collection
+	notesCollection           *mongo.Collection
+	chunksCollection          *mongo.Collection
 	channelSettingsCollection *mongo.Collection
-	collectionsClient pb.CollectionsClient
-	pointsClient     pb.PointsClient
-	genaiClient      *genai.Client
-	jobQueue         chan models.ProcessingJob
-	wg               sync.WaitGroup
+	collectionsClient         pb.CollectionsClient
+	pointsClient              pb.PointsClient
+	aiClient                  *ai.AIClient
+	jobQueue                  chan models.ProcessingJob
+	wg                        sync.WaitGroup
 )
 
 func main() {
@@ -62,22 +62,22 @@ func main() {
 		log.Fatal("Failed to connect to Qdrant:", err)
 	}
 	defer conn.Close()
-	
+
 	collectionsClient = pb.NewCollectionsClient(conn)
 	pointsClient = pb.NewPointsClient(conn)
 
-	genaiClient, err = genai.NewClient(context.Background(), option.WithAPIKey(cfg.GeminiAPIKey))
+	aiClient, err = ai.NewAIClient(context.Background(), cfg.GeminiAPIKey)
 	if err != nil {
-		log.Fatal("Failed to create Gemini client:", err)
+		log.Fatal("Failed to create AI client:", err)
 	}
-	defer genaiClient.Close()
+	defer aiClient.Close()
 
 	if err := initializeQdrant(); err != nil {
 		log.Fatal("Failed to initialize Qdrant:", err)
 	}
 
-	jobQueue = make(chan ProcessingJob, 100)
-	
+	jobQueue = make(chan models.ProcessingJob, 100)
+
 	for i := 0; i < 3; i++ {
 		wg.Add(1)
 		go processingWorker()
@@ -123,7 +123,7 @@ func main() {
 
 func initializeQdrant() error {
 	ctx := context.Background()
-	
+
 	collections, err := collectionsClient.List(ctx, &pb.ListCollectionsRequest{})
 	if err != nil {
 		return fmt.Errorf("failed to list collections: %w", err)
@@ -160,7 +160,7 @@ func initializeQdrant() error {
 
 func processingWorker() {
 	defer wg.Done()
-	
+
 	for job := range jobQueue {
 		if err := processNoteJob(job); err != nil {
 			log.Printf("Error processing job for note %s: %v", job.NoteID.Hex(), err)
@@ -184,17 +184,18 @@ Rules:
 Category:`, strings.Join(config.CATEGORIES, ", "), title, content)
 
 	ctx := context.Background()
-	model := genaiClient.GenerativeModel(GENERATION_MODEL)
+	model := aiClient.GenerativeModel(config.GENERATION_MODEL)
 	result, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		return "", fmt.Errorf("failed to generate classification: %w", err)
 	}
 
-	if result == nil || len(result.Candidates) == 0 || result.Candidates[0].Content == nil {
-		return "", fmt.Errorf("no classification result returned")
+	categoryText, err := ai.ExtractTextResponse(result)
+	if err != nil {
+		return "", fmt.Errorf("failed to extract classification: %w", err)
 	}
 
-	category := strings.TrimSpace(strings.ToLower(string(result.Candidates[0].Content.Parts[0].(genai.Text))))
+	category := strings.ToLower(categoryText)
 
 	// Validate category is in our list
 	if config.IsValidCategory(category) {
@@ -240,22 +241,15 @@ Return this exact JSON structure:
 		summaryField)
 
 	ctx := context.Background()
-	model := genaiClient.GenerativeModel(config.GENERATION_MODEL)
+	model := aiClient.GenerativeModel(config.GENERATION_MODEL)
 	result, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		return nil, fmt.Errorf("failed to analyze note: %w", err)
 	}
 
-	if result == nil || len(result.Candidates) == 0 || result.Candidates[0].Content == nil {
-		return nil, fmt.Errorf("no analysis result returned")
-	}
-
-	responseText := string(result.Candidates[0].Content.Parts[0].(genai.Text))
-	responseText = utils.CleanMarkdownCodeBlocks(responseText)
-
 	var analysis models.NoteAnalysis
-	if err := json.Unmarshal([]byte(responseText), &analysis); err != nil {
-		log.Printf("Failed to parse analysis JSON: %s, error: %v", responseText, err)
+	if err := ai.ExtractJSONResponse(result, &analysis); err != nil {
+		log.Printf("Failed to extract analysis JSON: %v", err)
 		return nil, fmt.Errorf("failed to parse analysis response: %w", err)
 	}
 
@@ -330,7 +324,7 @@ func processNoteJob(job models.ProcessingJob) error {
 func generateEmbedding(text string) ([]float32, error) {
 	ctx := context.Background()
 
-	model := genaiClient.EmbeddingModel(config.EMBEDDING_MODEL)
+	model := aiClient.EmbeddingModel(config.EMBEDDING_MODEL)
 
 	result, err := model.EmbedContent(ctx, genai.Text(text))
 	if err != nil {
@@ -604,14 +598,14 @@ func updateNote(c *gin.Context) {
 		}
 		return
 	}
-	
+
 	// Generate new title from content
 	newTitle, err := generateTitle(req.Content)
 	if err != nil {
 		log.Printf("Failed to generate title for updated note: %v", err)
 		newTitle = "Updated Note" // fallback
 	}
-	
+
 	// Update the note
 	update := bson.M{
 		"$set": bson.M{
@@ -619,7 +613,7 @@ func updateNote(c *gin.Context) {
 			"content": req.Content,
 		},
 	}
-	
+
 	_, err = notesCollection.UpdateOne(context.Background(), bson.M{"_id": objID}, update)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update note"})
@@ -641,20 +635,20 @@ func updateNote(c *gin.Context) {
 		Content:  updatedNote.Content,
 		Metadata: updatedNote.Metadata,
 	}
-	
+
 	select {
 	case jobQueue <- job:
 		log.Printf("Queued re-processing job for updated note: %s", updatedNote.ID.Hex())
 	default:
 		log.Printf("Job queue full, skipping re-processing for updated note: %s", updatedNote.ID.Hex())
 	}
-	
+
 	c.JSON(http.StatusOK, updatedNote)
 }
 
 func deleteNote(c *gin.Context) {
 	noteID := c.Param("id")
-	
+
 	objID, err := primitive.ObjectIDFromHex(noteID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid note ID"})
@@ -672,24 +666,24 @@ func deleteNote(c *gin.Context) {
 		}
 		return
 	}
-	
+
 	// Delete note from MongoDB
 	_, err = notesCollection.DeleteOne(context.Background(), bson.M{"_id": objID})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete note"})
 		return
 	}
-	
+
 	// Delete associated chunks from MongoDB
 	_, err = chunksCollection.DeleteMany(context.Background(), bson.M{"note_id": objID})
 	if err != nil {
 		log.Printf("Failed to delete chunks for note %s: %v", noteID, err)
 		// Don't fail the request, just log the error
 	}
-	
+
 	// TODO: Delete embeddings from Qdrant (would require additional logic to find points by note_id)
 	// For now, we'll leave the embeddings as they won't match any existing notes
-	
+
 	c.JSON(http.StatusOK, gin.H{"message": "Note deleted successfully"})
 }
 
@@ -727,7 +721,7 @@ func searchNotes(c *gin.Context) {
 	for _, point := range searchResult.Result {
 		noteIDStr := point.Payload["note_id"].GetStringValue()
 		score := point.Score
-		
+
 		if existingScore, exists := noteScores[noteIDStr]; !exists || score > existingScore {
 			noteScores[noteIDStr] = score
 		}
@@ -895,7 +889,7 @@ func getCategoryStats(c *gin.Context) {
 
 	var categoryStats []models.CategoryCount
 	totalNotes := 0
-	
+
 	for cursor.Next(context.Background()) {
 		var result struct {
 			ID    string `bson:"_id"`
@@ -968,10 +962,10 @@ func classifyExistingNotes(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Classification complete",
+		"message":    "Classification complete",
 		"classified": classified,
-		"errors": errors,
-		"total": len(notes),
+		"errors":     errors,
+		"total":      len(notes),
 	})
 }
 
@@ -1008,7 +1002,7 @@ func answerQuestion(c *gin.Context) {
 	for _, point := range searchResult.Result {
 		noteIDStr := point.Payload["note_id"].GetStringValue()
 		score := point.Score
-		
+
 		// Only include highly relevant notes (higher threshold for Q&A)
 		if score >= 0.4 && !noteIDs[noteIDStr] {
 			if objID, err := primitive.ObjectIDFromHex(noteIDStr); err == nil {
@@ -1019,7 +1013,7 @@ func answerQuestion(c *gin.Context) {
 						Note:  note,
 						Score: score,
 					})
-					
+
 					// Add to context with clear delineation
 					contextText.WriteString(fmt.Sprintf("Title: %s\nContent: %s\n\n", note.Title, note.Content))
 					noteIDs[noteIDStr] = true
@@ -1069,18 +1063,13 @@ Instructions:
 Answer:`, contextText, question)
 
 	ctx := context.Background()
-	model := genaiClient.GenerativeModel(config.GENERATION_MODEL)
+	model := aiClient.GenerativeModel(config.GENERATION_MODEL)
 	result, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		return "", fmt.Errorf("failed to generate answer: %w", err)
 	}
 
-	if result == nil || len(result.Candidates) == 0 || result.Candidates[0].Content == nil {
-		return "", fmt.Errorf("no answer generated")
-	}
-
-	answer := strings.TrimSpace(string(result.Candidates[0].Content.Parts[0].(genai.Text)))
-	return answer, nil
+	return ai.ExtractTextResponse(result)
 }
 
 func generateTitle(content string) (string, error) {
@@ -1104,18 +1093,17 @@ Content:
 Title:`, excerpt)
 
 	ctx := context.Background()
-	model := genaiClient.GenerativeModel(config.GENERATION_MODEL)
+	model := aiClient.GenerativeModel(config.GENERATION_MODEL)
 	result, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		return "", fmt.Errorf("failed to generate title: %w", err)
 	}
 
-	if result == nil || len(result.Candidates) == 0 || result.Candidates[0].Content == nil {
-		return "", fmt.Errorf("no title generated")
+	title, err := ai.ExtractTextResponse(result)
+	if err != nil {
+		return "", fmt.Errorf("failed to extract title: %w", err)
 	}
 
-	title := strings.TrimSpace(string(result.Candidates[0].Content.Parts[0].(genai.Text)))
-	
 	// Clean up the title (remove quotes, ensure reasonable length)
 	title = strings.Trim(title, "\"'")
 	if len(title) > 100 {
@@ -1124,7 +1112,7 @@ Title:`, excerpt)
 	if title == "" {
 		title = "Untitled Note"
 	}
-	
+
 	return title, nil
 }
 
@@ -1143,19 +1131,18 @@ Content to analyze:
 
 	// Use Gemini to generate a response
 	ctx := context.Background()
-	model := genaiClient.GenerativeModel(config.GENERATION_MODEL)
+	model := aiClient.GenerativeModel(config.GENERATION_MODEL)
 	result, err := model.GenerateContent(ctx, genai.Text(fullPrompt))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate AI response"})
 		return
 	}
 
-	if result == nil || len(result.Candidates) == 0 || result.Candidates[0].Content == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "No response generated"})
+	response, err := ai.ExtractTextResponse(result)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to extract AI response"})
 		return
 	}
-
-	response := strings.TrimSpace(string(result.Candidates[0].Content.Parts[0].(genai.Text)))
 
 	c.JSON(http.StatusOK, models.AIQuestionResponse{
 		Response: response,
@@ -1352,18 +1339,13 @@ Summary:`, content)
 	}
 
 	ctx := context.Background()
-	model := genaiClient.GenerativeModel(config.GENERATION_MODEL)
+	model := aiClient.GenerativeModel(config.GENERATION_MODEL)
 	result, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		return "", fmt.Errorf("failed to generate summary: %w", err)
 	}
 
-	if result == nil || len(result.Candidates) == 0 || result.Candidates[0].Content == nil {
-		return "", fmt.Errorf("no summary generated")
-	}
-
-	summary := strings.TrimSpace(string(result.Candidates[0].Content.Parts[0].(genai.Text)))
-	return summary, nil
+	return ai.ExtractTextResponse(result)
 }
 
 // generateStructuredSummary generates a summary with structured data based on a schema
@@ -1392,24 +1374,18 @@ Content to analyze:
 %s`, promptText, promptSchema, content)
 
 	ctx := context.Background()
-	model := genaiClient.GenerativeModel(config.GENERATION_MODEL)
+	model := aiClient.GenerativeModel(config.GENERATION_MODEL)
 	result, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to generate structured summary: %w", err)
 	}
 
-	if result == nil || len(result.Candidates) == 0 || result.Candidates[0].Content == nil {
-		return "", nil, fmt.Errorf("no structured summary generated")
-	}
-
-	responseText := string(result.Candidates[0].Content.Parts[0].(genai.Text))
-	responseText = utils.CleanMarkdownCodeBlocks(responseText)
-
 	// Parse the JSON response
 	var structuredData map[string]interface{}
-	if err := json.Unmarshal([]byte(responseText), &structuredData); err != nil {
-		log.Printf("Failed to parse structured summary JSON: %s, error: %v", responseText, err)
+	if err := ai.ExtractJSONResponse(result, &structuredData); err != nil {
+		log.Printf("Failed to parse structured summary JSON: %v", err)
 		// Fall back to treating the response as plain text summary
+		responseText, _ := ai.ExtractTextResponse(result)
 		return responseText, nil, nil
 	}
 
@@ -1419,11 +1395,6 @@ Content to analyze:
 		if summaryStr, ok := summaryVal.(string); ok {
 			summary = summaryStr
 		}
-	}
-
-	// If no summary in structured data, use the full response as summary
-	if summary == "" {
-		summary = responseText
 	}
 
 	return summary, structuredData, nil
@@ -1470,10 +1441,10 @@ func regenerateAllTitles(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Title regeneration complete",
+		"message":     "Title regeneration complete",
 		"regenerated": regenerated,
-		"errors": errors,
-		"total": len(notes),
+		"errors":      errors,
+		"total":       len(notes),
 	})
 }
 
@@ -1484,8 +1455,8 @@ func getChannelsWithNotes(c *gin.Context) {
 	pipeline := mongo.Pipeline{
 		{{Key: "$match", Value: bson.M{"metadata.author": bson.M{"$exists": true, "$ne": ""}}}},
 		{{Key: "$group", Value: bson.M{
-			"_id": "$metadata.author",
-			"platform": bson.M{"$first": "$metadata.platform"},
+			"_id":       "$metadata.author",
+			"platform":  bson.M{"$first": "$metadata.platform"},
 			"noteCount": bson.M{"$sum": 1},
 		}}},
 		{{Key: "$sort", Value: bson.M{"noteCount": -1}}},
