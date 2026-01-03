@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -22,7 +21,7 @@ import (
 	"backend/internal/config"
 	"backend/internal/models"
 	"backend/internal/repository"
-	"backend/internal/utils"
+	"backend/internal/services"
 	"backend/internal/vectordb"
 )
 
@@ -33,8 +32,7 @@ var (
 	channelSettingsRepo *repository.ChannelSettingsRepository
 	qdrantClient        *vectordb.QdrantClient
 	aiClient            *ai.AIClient
-	jobQueue            chan models.ProcessingJob
-	wg                  sync.WaitGroup
+	workerPool          *services.WorkerPool
 )
 
 func main() {
@@ -70,12 +68,9 @@ func main() {
 		log.Fatal("Failed to initialize Qdrant:", err)
 	}
 
-	jobQueue = make(chan models.ProcessingJob, 100)
-
-	for i := 0; i < 3; i++ {
-		wg.Add(1)
-		go processingWorker()
-	}
+	workerPool = services.NewWorkerPool(3, 100, chunksRepo, aiClient, qdrantClient)
+	workerPool.Start()
+	defer workerPool.Stop()
 
 	r := gin.Default()
 
@@ -113,64 +108,6 @@ func main() {
 
 	log.Println("Server starting on :8080")
 	r.Run(":8080")
-}
-
-func processingWorker() {
-	defer wg.Done()
-
-	for job := range jobQueue {
-		if err := processNoteJob(job); err != nil {
-			log.Printf("Error processing job for note %s: %v", job.NoteID.Hex(), err)
-		}
-	}
-}
-
-func processNoteJob(job models.ProcessingJob) error {
-	// Note: Title, category, and summary are now generated during createNote()
-	// This job only handles embedding generation
-
-	fullText := job.Title + "\n\n" + job.Content
-
-	// Skip embedding if sensitive data detected
-	if utils.ContainsSensitiveData(fullText) {
-		log.Printf("Skipping embedding for note %s: Sensitive data detected (API keys, passwords, etc.)", job.NoteID.Hex())
-		return nil // Not an error, just skip embedding for security
-	}
-
-	words := strings.Fields(fullText)
-
-	if len(words) > config.MAX_WORDS {
-		words = words[:config.MAX_WORDS]
-		fullText = strings.Join(words, " ")
-	}
-
-	chunks := utils.ChunkText(fullText, config.CHUNK_SIZE)
-
-	for i, chunk := range chunks {
-		chunkDoc := models.NoteChunk{
-			NoteID:   job.NoteID,
-			Content:  chunk,
-			ChunkIdx: i,
-		}
-
-		chunkID, err := chunksRepo.Create(context.Background(), &chunkDoc)
-		if err != nil {
-			log.Printf("Error saving chunk: %v", err)
-			continue
-		}
-
-		embedding, err := aiClient.GenerateEmbedding(chunk)
-		if err != nil {
-			log.Printf("Error generating embedding: %v", err)
-			continue
-		}
-
-		if err := qdrantClient.StoreEmbedding(chunkID, job.NoteID, embedding); err != nil {
-			log.Printf("Error storing embedding: %v", err)
-		}
-	}
-
-	return nil
 }
 
 func getNotes(c *gin.Context) {
@@ -329,19 +266,12 @@ func createNote(c *gin.Context) {
 	note.ID = noteID
 
 	// Queue job for embedding generation only (title, category, summary already done)
-	job := models.ProcessingJob{
+	workerPool.Submit(models.ProcessingJob{
 		NoteID:   note.ID,
 		Title:    note.Title,
 		Content:  note.Content,
 		Metadata: note.Metadata,
-	}
-
-	select {
-	case jobQueue <- job:
-		log.Printf("Queued embedding job for note: %s", note.ID.Hex())
-	default:
-		log.Printf("Job queue full, skipping embedding for note: %s", note.ID.Hex())
-	}
+	})
 
 	c.JSON(http.StatusCreated, note)
 }
@@ -400,20 +330,13 @@ func updateNote(c *gin.Context) {
 		return
 	}
 
-	// Queue re-processing job for embeddings and classification
-	job := models.ProcessingJob{
+	// Queue re-processing job for embeddings
+	workerPool.Submit(models.ProcessingJob{
 		NoteID:   updatedNote.ID,
 		Title:    updatedNote.Title,
 		Content:  updatedNote.Content,
 		Metadata: updatedNote.Metadata,
-	}
-
-	select {
-	case jobQueue <- job:
-		log.Printf("Queued re-processing job for updated note: %s", updatedNote.ID.Hex())
-	default:
-		log.Printf("Job queue full, skipping re-processing for updated note: %s", updatedNote.ID.Hex())
-	}
+	})
 
 	c.JSON(http.StatusOK, *updatedNote)
 }
