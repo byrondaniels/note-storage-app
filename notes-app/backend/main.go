@@ -20,7 +20,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -32,13 +31,15 @@ import (
 )
 
 var (
-	mongoClient       *repository.MongoClient
-	notesRepo         *repository.NotesRepository
-	collectionsClient pb.CollectionsClient
-	pointsClient      pb.PointsClient
-	aiClient          *ai.AIClient
-	jobQueue          chan models.ProcessingJob
-	wg                sync.WaitGroup
+	mongoClient         *repository.MongoClient
+	notesRepo           *repository.NotesRepository
+	chunksRepo          *repository.ChunksRepository
+	channelSettingsRepo *repository.ChannelSettingsRepository
+	collectionsClient   pb.CollectionsClient
+	pointsClient        pb.PointsClient
+	aiClient            *ai.AIClient
+	jobQueue            chan models.ProcessingJob
+	wg                  sync.WaitGroup
 )
 
 func main() {
@@ -55,6 +56,8 @@ func main() {
 	defer mongoClient.Close(context.TODO())
 
 	notesRepo = repository.NewNotesRepository(mongoClient.GetDatabase())
+	chunksRepo = repository.NewChunksRepository(mongoClient.GetDatabase())
+	channelSettingsRepo = repository.NewChannelSettingsRepository(mongoClient.GetDatabase())
 
 	conn, err := grpc.Dial(cfg.QdrantURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -195,13 +198,11 @@ func processNoteJob(job models.ProcessingJob) error {
 			ChunkIdx: i,
 		}
 
-		result, err := mongoClient.ChunksCollection().InsertOne(context.Background(), chunkDoc)
+		chunkID, err := chunksRepo.Create(context.Background(), &chunkDoc)
 		if err != nil {
 			log.Printf("Error saving chunk: %v", err)
 			continue
 		}
-
-		chunkID := result.InsertedID.(primitive.ObjectID)
 
 		embedding, err := aiClient.GenerateEmbedding(chunk)
 		if err != nil {
@@ -292,13 +293,8 @@ func createNote(c *gin.Context) {
 	// Check for custom prompt settings based on author/channel
 	var customPromptText, customPromptSchema string
 	if author, ok := metadata["author"].(string); ok && author != "" {
-		var settings models.ChannelSettings
-		err := mongoClient.ChannelSettingsCollection().FindOne(
-			context.Background(),
-			bson.M{"channel_name": author},
-		).Decode(&settings)
-
-		if err == nil && (settings.PromptText != "" || settings.PromptSchema != "") {
+		settings, err := channelSettingsRepo.FindByName(context.Background(), author)
+		if err == nil && settings != nil && (settings.PromptText != "" || settings.PromptSchema != "") {
 			customPromptText = settings.PromptText
 			customPromptSchema = settings.PromptSchema
 			log.Printf("Found custom prompt for channel '%s' during note creation", author)
@@ -523,7 +519,7 @@ func deleteNote(c *gin.Context) {
 	}
 
 	// Delete associated chunks from MongoDB
-	_, err = mongoClient.ChunksCollection().DeleteMany(context.Background(), bson.M{"note_id": objID})
+	_, err = chunksRepo.DeleteByNoteID(context.Background(), objID)
 	if err != nil {
 		log.Printf("Failed to delete chunks for note %s: %v", noteID, err)
 		// Don't fail the request, just log the error
@@ -915,13 +911,8 @@ func summarizeNote(c *gin.Context) {
 	var promptText, promptSchema string
 	if note.Metadata != nil {
 		if author, ok := note.Metadata["author"].(string); ok && author != "" {
-			var settings models.ChannelSettings
-			err = mongoClient.ChannelSettingsCollection().FindOne(
-				context.Background(),
-				bson.M{"channel_name": author},
-			).Decode(&settings)
-
-			if err == nil {
+			settings, _ := channelSettingsRepo.FindByName(context.Background(), author)
+			if settings != nil {
 				promptText = settings.PromptText
 				promptSchema = settings.PromptSchema
 			}
@@ -988,13 +979,8 @@ func summarizeNoteById(c *gin.Context) {
 	// If no override provided, check channel settings
 	if promptText == "" && promptSchema == "" && note.Metadata != nil {
 		if author, ok := note.Metadata["author"].(string); ok && author != "" {
-			var settings models.ChannelSettings
-			err = mongoClient.ChannelSettingsCollection().FindOne(
-				context.Background(),
-				bson.M{"channel_name": author},
-			).Decode(&settings)
-
-			if err == nil {
+			settings, _ := channelSettingsRepo.FindByName(context.Background(), author)
+			if settings != nil {
 				promptText = settings.PromptText
 				promptSchema = settings.PromptSchema
 				if promptText != "" || promptSchema != "" {
@@ -1115,22 +1101,10 @@ func getChannelsWithNotes(c *gin.Context) {
 }
 
 func getAllChannelSettings(c *gin.Context) {
-	cursor, err := mongoClient.ChannelSettingsCollection().Find(context.Background(), bson.M{})
+	settings, err := channelSettingsRepo.FindAll(context.Background())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get channel settings"})
 		return
-	}
-	defer cursor.Close(context.Background())
-
-	var settings []models.ChannelSettings
-	if err = cursor.All(context.Background(), &settings); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode settings"})
-		return
-	}
-
-	// Return empty array if no settings
-	if settings == nil {
-		settings = []models.ChannelSettings{}
 	}
 
 	c.JSON(http.StatusOK, settings)
@@ -1139,13 +1113,13 @@ func getAllChannelSettings(c *gin.Context) {
 func getChannelSettings(c *gin.Context) {
 	channelName := c.Param("channel")
 
-	var settings models.ChannelSettings
-	err := mongoClient.ChannelSettingsCollection().FindOne(
-		context.Background(),
-		bson.M{"channel_name": channelName},
-	).Decode(&settings)
+	settings, err := channelSettingsRepo.FindByName(context.Background(), channelName)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get settings"})
+		return
+	}
 
-	if err == mongo.ErrNoDocuments {
+	if settings == nil {
 		// Return default settings if not found
 		c.JSON(http.StatusOK, models.ChannelSettings{
 			ChannelName:  channelName,
@@ -1156,12 +1130,7 @@ func getChannelSettings(c *gin.Context) {
 		return
 	}
 
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get settings"})
-		return
-	}
-
-	c.JSON(http.StatusOK, settings)
+	c.JSON(http.StatusOK, *settings)
 }
 
 func updateChannelSettings(c *gin.Context) {
@@ -1198,14 +1167,7 @@ func updateChannelSettings(c *gin.Context) {
 	}
 
 	// Upsert the settings
-	opts := options.Update().SetUpsert(true)
-	_, err := mongoClient.ChannelSettingsCollection().UpdateOne(
-		context.Background(),
-		bson.M{"channel_name": channelName},
-		bson.M{"$set": settings},
-		opts,
-	)
-
+	err := channelSettingsRepo.Upsert(context.Background(), &settings)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save settings"})
 		return
@@ -1219,17 +1181,13 @@ func deleteChannelSettings(c *gin.Context) {
 
 	log.Printf("Deleting channel settings for: %s", channelName)
 
-	result, err := mongoClient.ChannelSettingsCollection().DeleteOne(
-		context.Background(),
-		bson.M{"channel_name": channelName},
-	)
-
+	deletedCount, err := channelSettingsRepo.Delete(context.Background(), channelName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete settings"})
 		return
 	}
 
-	if result.DeletedCount == 0 {
+	if deletedCount == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Settings not found"})
 		return
 	}
@@ -1255,14 +1213,11 @@ func deleteChannelNotes(c *gin.Context) {
 	// Delete each note and its associated chunks/embeddings
 	for _, note := range notes {
 		// Delete chunks for this note
-		chunkResult, err := mongoClient.ChunksCollection().DeleteMany(
-			context.Background(),
-			bson.M{"note_id": note.ID},
-		)
+		chunkCount, err := chunksRepo.DeleteByNoteID(context.Background(), note.ID)
 		if err != nil {
 			log.Printf("Error deleting chunks for note %s: %v", note.ID.Hex(), err)
 		} else {
-			deletedChunks += int(chunkResult.DeletedCount)
+			deletedChunks += int(chunkCount)
 		}
 
 		// TODO: Delete embeddings from Qdrant (would need to query by note_id in payload)
