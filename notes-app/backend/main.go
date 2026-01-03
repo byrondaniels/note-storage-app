@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -16,18 +14,16 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/google/generative-ai-go/genai"
-	pb "github.com/qdrant/go-client/qdrant"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	"backend/internal/ai"
 	"backend/internal/config"
 	"backend/internal/models"
 	"backend/internal/repository"
 	"backend/internal/utils"
+	"backend/internal/vectordb"
 )
 
 var (
@@ -35,8 +31,7 @@ var (
 	notesRepo           *repository.NotesRepository
 	chunksRepo          *repository.ChunksRepository
 	channelSettingsRepo *repository.ChannelSettingsRepository
-	collectionsClient   pb.CollectionsClient
-	pointsClient        pb.PointsClient
+	qdrantClient        *vectordb.QdrantClient
 	aiClient            *ai.AIClient
 	jobQueue            chan models.ProcessingJob
 	wg                  sync.WaitGroup
@@ -59,14 +54,11 @@ func main() {
 	chunksRepo = repository.NewChunksRepository(mongoClient.GetDatabase())
 	channelSettingsRepo = repository.NewChannelSettingsRepository(mongoClient.GetDatabase())
 
-	conn, err := grpc.Dial(cfg.QdrantURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	qdrantClient, err = vectordb.NewQdrantClient(cfg.QdrantURL)
 	if err != nil {
 		log.Fatal("Failed to connect to Qdrant:", err)
 	}
-	defer conn.Close()
-
-	collectionsClient = pb.NewCollectionsClient(conn)
-	pointsClient = pb.NewPointsClient(conn)
+	defer qdrantClient.Close()
 
 	aiClient, err = ai.NewAIClient(context.Background(), cfg.GeminiAPIKey)
 	if err != nil {
@@ -74,7 +66,7 @@ func main() {
 	}
 	defer aiClient.Close()
 
-	if err := initializeQdrant(); err != nil {
+	if err := qdrantClient.Initialize(); err != nil {
 		log.Fatal("Failed to initialize Qdrant:", err)
 	}
 
@@ -121,43 +113,6 @@ func main() {
 
 	log.Println("Server starting on :8080")
 	r.Run(":8080")
-}
-
-func initializeQdrant() error {
-	ctx := context.Background()
-
-	collections, err := collectionsClient.List(ctx, &pb.ListCollectionsRequest{})
-	if err != nil {
-		return fmt.Errorf("failed to list collections: %w", err)
-	}
-
-	collectionExists := false
-	for _, collection := range collections.Collections {
-		if collection.Name == config.COLLECTION_NAME {
-			collectionExists = true
-			break
-		}
-	}
-
-	if !collectionExists {
-		log.Printf("Creating Qdrant collection: %s", config.COLLECTION_NAME)
-		_, err := collectionsClient.Create(ctx, &pb.CreateCollection{
-			CollectionName: config.COLLECTION_NAME,
-			VectorsConfig: &pb.VectorsConfig{
-				Config: &pb.VectorsConfig_Params{
-					Params: &pb.VectorParams{
-						Size:     config.EMBEDDING_DIM,
-						Distance: pb.Distance_Cosine,
-					},
-				},
-			},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to create collection: %w", err)
-		}
-	}
-
-	return nil
 }
 
 func processingWorker() {
@@ -210,40 +165,12 @@ func processNoteJob(job models.ProcessingJob) error {
 			continue
 		}
 
-		if err := storeEmbedding(chunkID, job.NoteID, embedding); err != nil {
+		if err := qdrantClient.StoreEmbedding(chunkID, job.NoteID, embedding); err != nil {
 			log.Printf("Error storing embedding: %v", err)
 		}
 	}
 
 	return nil
-}
-
-func storeEmbedding(chunkID, noteID primitive.ObjectID, embedding []float32) error {
-	ctx := context.Background()
-
-	point := &pb.PointStruct{
-		Id: &pb.PointId{
-			PointIdOptions: &pb.PointId_Num{
-				Num: uint64(time.Now().UnixNano()), // Use timestamp as unique ID
-			},
-		},
-		Vectors: &pb.Vectors{
-			VectorsOptions: &pb.Vectors_Vector{
-				Vector: &pb.Vector{Data: embedding},
-			},
-		},
-		Payload: map[string]*pb.Value{
-			"chunk_id": {Kind: &pb.Value_StringValue{StringValue: chunkID.Hex()}},
-			"note_id":  {Kind: &pb.Value_StringValue{StringValue: noteID.Hex()}},
-		},
-	}
-
-	_, err := pointsClient.Upsert(ctx, &pb.UpsertPoints{
-		CollectionName: config.COLLECTION_NAME,
-		Points:         []*pb.PointStruct{point},
-	})
-
-	return err
 }
 
 func getNotes(c *gin.Context) {
@@ -525,8 +452,12 @@ func deleteNote(c *gin.Context) {
 		// Don't fail the request, just log the error
 	}
 
-	// TODO: Delete embeddings from Qdrant (would require additional logic to find points by note_id)
-	// For now, we'll leave the embeddings as they won't match any existing notes
+	// Delete embeddings from Qdrant
+	_, err = qdrantClient.DeleteByNoteID(objID)
+	if err != nil {
+		log.Printf("Failed to delete embeddings for note %s: %v", noteID, err)
+		// Don't fail the request, just log the error
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Note deleted successfully"})
 }
@@ -548,12 +479,7 @@ func searchNotes(c *gin.Context) {
 		return
 	}
 
-	searchResult, err := pointsClient.Search(context.Background(), &pb.SearchPoints{
-		CollectionName: config.COLLECTION_NAME,
-		Vector:         queryEmbedding,
-		Limit:          uint64(req.Limit * 2),
-		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
-	})
+	searchResults, err := qdrantClient.Search(queryEmbedding, req.Limit*2)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Search failed"})
 		return
@@ -562,14 +488,11 @@ func searchNotes(c *gin.Context) {
 	noteScores := make(map[string]float32)
 	noteIDs := make(map[string]bool)
 
-	for _, point := range searchResult.Result {
-		noteIDStr := point.Payload["note_id"].GetStringValue()
-		score := point.Score
-
-		if existingScore, exists := noteScores[noteIDStr]; !exists || score > existingScore {
-			noteScores[noteIDStr] = score
+	for _, result := range searchResults {
+		if existingScore, exists := noteScores[result.NoteID]; !exists || result.Score > existingScore {
+			noteScores[result.NoteID] = result.Score
 		}
-		noteIDs[noteIDStr] = true
+		noteIDs[result.NoteID] = true
 	}
 
 	var objectIDs []primitive.ObjectID
@@ -792,12 +715,7 @@ func answerQuestion(c *gin.Context) {
 		return
 	}
 
-	searchResult, err := pointsClient.Search(context.Background(), &pb.SearchPoints{
-		CollectionName: config.COLLECTION_NAME,
-		Vector:         queryEmbedding,
-		Limit:          uint64(5), // Get top 5 most relevant notes
-		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
-	})
+	searchResults, err := qdrantClient.Search(queryEmbedding, 5) // Get top 5 most relevant notes
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Search failed"})
 		return
@@ -808,23 +726,20 @@ func answerQuestion(c *gin.Context) {
 	var contextText strings.Builder
 	noteIDs := make(map[string]bool)
 
-	for _, point := range searchResult.Result {
-		noteIDStr := point.Payload["note_id"].GetStringValue()
-		score := point.Score
-
+	for _, result := range searchResults {
 		// Only include highly relevant notes (higher threshold for Q&A)
-		if score >= 0.4 && !noteIDs[noteIDStr] {
-			if objID, err := primitive.ObjectIDFromHex(noteIDStr); err == nil {
+		if result.Score >= 0.4 && !noteIDs[result.NoteID] {
+			if objID, err := primitive.ObjectIDFromHex(result.NoteID); err == nil {
 				note, err := notesRepo.FindByID(context.Background(), objID)
 				if err == nil {
 					relevantNotes = append(relevantNotes, models.SearchResult{
 						Note:  *note,
-						Score: score,
+						Score: result.Score,
 					})
 
 					// Add to context with clear delineation
 					contextText.WriteString(fmt.Sprintf("Title: %s\nContent: %s\n\n", note.Title, note.Content))
-					noteIDs[noteIDStr] = true
+					noteIDs[result.NoteID] = true
 				}
 			}
 		}
@@ -1220,7 +1135,11 @@ func deleteChannelNotes(c *gin.Context) {
 			deletedChunks += int(chunkCount)
 		}
 
-		// TODO: Delete embeddings from Qdrant (would need to query by note_id in payload)
+		// Delete embeddings from Qdrant
+		_, err = qdrantClient.DeleteByNoteID(note.ID)
+		if err != nil {
+			log.Printf("Error deleting embeddings for note %s: %v", note.ID.Hex(), err)
+		}
 
 		// Delete the note
 		err = notesRepo.Delete(context.Background(), note.ID)
