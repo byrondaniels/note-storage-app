@@ -1,4 +1,4 @@
-module notes-backend
+module backend
 
 go 1.21
 
