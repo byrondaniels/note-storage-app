@@ -1,0 +1,84 @@
+# Docker Compose configuration for E2E testing
+# This creates an isolated test environment separate from production
+
+services:
+  mongo-test:
+    image: mongo:7.0
+    container_name: notes-mongo-test
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: notesdb_test
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo_test_data:/data/db
+    networks:
+      - notes-test-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  qdrant-test:
+    image: qdrant/qdrant:latest
+    container_name: notes-qdrant-test
+    restart: unless-stopped
+    ports:
+      - "6335:6333"
+      - "6336:6334"
+    volumes:
+      - qdrant_test_data:/qdrant/storage
+    networks:
+      - notes-test-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend-test:
+    build: ./backend
+    container_name: notes-backend-test
+    restart: unless-stopped
+    environment:
+      MONGO_URI: mongodb://mongo-test:27017
+      QDRANT_URL: http://qdrant-test:6333
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GIN_MODE: test
+    ports:
+      - "8081:8080"
+    depends_on:
+      mongo-test:
+        condition: service_healthy
+      qdrant-test:
+        condition: service_healthy
+    networks:
+      - notes-test-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/notes"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  frontend-test:
+    build: ./frontend
+    container_name: notes-frontend-test
+    restart: unless-stopped
+    environment:
+      VUE_APP_API_URL: http://localhost:8081
+    ports:
+      - "3001:3000"
+    depends_on:
+      backend-test:
+        condition: service_healthy
+    networks:
+      - notes-test-network
+
+volumes:
+  mongo_test_data:
+  qdrant_test_data:
+
+networks:
+  notes-test-network:
+    driver: bridge
