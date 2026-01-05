@@ -100,11 +100,5 @@ class StorageService {
   }
 }
 
-// Export for ES6 modules (background, popup, options)
+// ES module export for background.js and other module contexts
 export { DEFAULT_CONFIG, StorageService };
-
-// Also make available globally for content scripts (when loaded as regular script)
-if (typeof window !== 'undefined') {
-  window.DEFAULT_CONFIG = DEFAULT_CONFIG;
-  window.StorageService = StorageService;
-}

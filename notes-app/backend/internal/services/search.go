@@ -19,14 +19,14 @@ import (
 // SearchService handles semantic search and Q&A operations
 type SearchService struct {
 	notesRepo    *repository.NotesRepository
-	aiClient     *ai.AIClient
+	aiClient     ai.Client
 	qdrantClient *vectordb.QdrantClient
 }
 
 // NewSearchService creates a new SearchService
 func NewSearchService(
 	notesRepo *repository.NotesRepository,
-	aiClient *ai.AIClient,
+	aiClient ai.Client,
 	qdrantClient *vectordb.QdrantClient,
 ) *SearchService {
 	return &SearchService{

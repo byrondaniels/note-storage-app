@@ -32,10 +32,11 @@ services:
     networks:
       - notes-test-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      test: ["CMD-SHELL", "cat /proc/*/comm 2>/dev/null | grep -q qdrant"]
       interval: 5s
-      timeout: 5s
+      timeout: 10s
       retries: 5
+      start_period: 15s
 
   backend-test:
     build: ./backend

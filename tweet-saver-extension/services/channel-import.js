@@ -77,6 +77,8 @@ class ChannelImportService {
    * @param {number|null} vueAppTabId - Tab ID of Vue app for bridge communication
    */
   sendProgressUpdate(message, vueAppTabId) {
+    console.log('ChannelImportService: Sending progress update:', message.current, '/', message.total, 'to tab:', vueAppTabId);
+
     // Send to popup (internal)
     chrome.runtime.sendMessage(message).catch(() => {
       // Ignore errors if popup is closed
@@ -84,9 +86,12 @@ class ChannelImportService {
 
     // Send to Vue app via content script bridge
     if (vueAppTabId) {
-      chrome.tabs.sendMessage(vueAppTabId, message).catch(() => {
-        // Ignore errors if tab is closed
-      });
+      console.log('ChannelImportService: Sending to Vue app tab:', vueAppTabId);
+      chrome.tabs.sendMessage(vueAppTabId, message)
+        .then(response => console.log('ChannelImportService: Tab message response:', response))
+        .catch(err => console.log('ChannelImportService: Tab message error:', err.message));
+    } else {
+      console.log('ChannelImportService: No vueAppTabId, skipping tab message');
     }
   }
 
@@ -95,10 +100,11 @@ class ChannelImportService {
    * @param {number} tabId - The tab ID to use for processing
    * @param {Array<Object>} videos - Array of video objects with url and title
    * @param {number|null} vueAppTabId - Tab ID of Vue app for progress updates
+   * @param {string} channelName - Name of the channel being imported
    * @returns {Promise<Object>} Results object with succeeded, skipped, failed counts
    */
-  async processVideoQueue(tabId, videos, vueAppTabId) {
-    console.log('ChannelImportService: Processing', videos.length, 'videos');
+  async processVideoQueue(tabId, videos, vueAppTabId, channelName = 'Unknown Channel') {
+    console.log('ChannelImportService: Processing', videos.length, 'videos from channel:', channelName);
 
     let processed = 0;
     let succeeded = 0;
@@ -115,7 +121,8 @@ class ChannelImportService {
           current: processed + 1,
           total: videos.length,
           status: 'processing',
-          videoTitle: video.title
+          videoTitle: video.title,
+          channelName: channelName
         }, vueAppTabId);
 
         // Navigate to video page
@@ -125,7 +132,8 @@ class ChannelImportService {
         await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Send message to content script to extract and save transcript
-        const result = await this.sendMessageToTab(tabId, { action: 'extractAndSaveTranscript' });
+        // Pass the channelName so it's consistent with what we saved in settings
+        const result = await this.sendMessageToTab(tabId, { action: 'extractAndSaveTranscript', channelName: channelName });
 
         if (result.success) {
           if (result.skipped) {
@@ -159,7 +167,8 @@ class ChannelImportService {
       status: 'complete',
       succeeded: succeeded,
       skipped: skipped,
-      failed: failed
+      failed: failed,
+      channelName: channelName
     }, vueAppTabId);
 
     return { succeeded, skipped, failed, total: videos.length };
@@ -226,14 +235,15 @@ class ChannelImportService {
       }
 
       const videos = scrapeResult.videos;
-      console.log('ChannelImportService: Scraped', videos.length, 'videos');
+      const channelName = scrapeResult.channelName || 'Unknown Channel';
+      console.log('ChannelImportService: Scraped', videos.length, 'videos from channel:', channelName);
 
       if (videos.length === 0) {
         throw new Error('No videos found on channel');
       }
 
       // Process the video queue
-      const result = await this.processVideoQueue(tabId, videos, vueAppTabId);
+      const result = await this.processVideoQueue(tabId, videos, vueAppTabId, channelName);
 
       // Close the import tab
       await chrome.tabs.remove(tabId);

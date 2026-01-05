@@ -18,11 +18,11 @@ import (
 // CategoriesHandler handles HTTP requests for category operations
 type CategoriesHandler struct {
 	notesRepo *repository.NotesRepository
-	aiClient  *ai.AIClient
+	aiClient  ai.Client
 }
 
 // NewCategoriesHandler creates a new CategoriesHandler
-func NewCategoriesHandler(notesRepo *repository.NotesRepository, aiClient *ai.AIClient) *CategoriesHandler {
+func NewCategoriesHandler(notesRepo *repository.NotesRepository, aiClient ai.Client) *CategoriesHandler {
 	return &CategoriesHandler{
 		notesRepo: notesRepo,
 		aiClient:  aiClient,

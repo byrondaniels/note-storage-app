@@ -288,3 +288,20 @@ Content to analyze:
 
 	return summary, structuredData, nil
 }
+
+// AskAboutContent asks the AI a question about specific content
+func (c *AIClient) AskAboutContent(prompt, content string) (string, error) {
+	fullPrompt := fmt.Sprintf(`%s
+
+Content to analyze:
+%s`, prompt, content)
+
+	ctx := context.Background()
+	model := c.GenerativeModel(config.GENERATION_MODEL)
+	result, err := model.GenerateContent(ctx, genai.Text(fullPrompt))
+	if err != nil {
+		return "", fmt.Errorf("failed to generate AI response: %w", err)
+	}
+
+	return ExtractTextResponse(result)
+}
