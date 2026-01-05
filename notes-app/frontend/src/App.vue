@@ -16,20 +16,31 @@ export default {
 </script>
 
 <style>
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
 #app {
   font-family: Avenir, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   color: #2c3e50;
   margin: 0;
-  padding: 20px;
+  padding: 0 20px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 nav {
-  padding: 30px 0;
+  padding: 20px 0;
   text-align: center;
   border-bottom: 2px solid #eee;
-  margin-bottom: 30px;
+  flex-shrink: 0;
 }
 
 nav a {

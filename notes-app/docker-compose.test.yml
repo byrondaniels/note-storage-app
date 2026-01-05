@@ -46,6 +46,7 @@ services:
       MONGO_URI: mongodb://mongo-test:27017
       QDRANT_URL: http://qdrant-test:6333
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      USE_REAL_AI: ${USE_REAL_AI:-}  # Set to "true" to use real Gemini API (consumes quota)
       GIN_MODE: test
     ports:
       - "8081:8080"
