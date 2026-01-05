@@ -1,11 +1,5 @@
 <template>
   <div class="import-section">
-    <div class="section-header" @click="expanded = !expanded">
-      <h2>Import YouTube Channel</h2>
-      <span class="expand-icon" :class="{ expanded }">▶</span>
-    </div>
-
-    <div v-show="expanded" class="section-content">
     <div v-if="!extensionAvailable" class="extension-warning">
       <strong>Extension Not Found</strong>
       <p>The Social Media Note Saver extension is required for importing.</p>
@@ -110,7 +104,6 @@
     <div v-if="message" :class="['import-message', messageType]">
       {{ message }}
     </div>
-    </div>
   </div>
 </template>
 
@@ -141,7 +134,6 @@ export default {
   },
   data() {
     return {
-      expanded: false,
       channelUrl: '',
       videoLimit: '20',
       promptTemplate: 'default',
@@ -281,43 +273,10 @@ export default {
 
 <style scoped>
 .import-section {
-  background: #f9f9f9;
-  border-radius: 8px;
+  background: white;
+  border-radius: 12px;
   padding: 24px;
-  margin-bottom: 30px;
-  border: 1px solid #e0e0e0;
-}
-
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  cursor: pointer;
-  user-select: none;
-}
-
-.section-header:hover {
-  opacity: 0.8;
-}
-
-.section-header h2 {
-  margin: 0;
-  font-size: 18px;
-  color: #333;
-}
-
-.expand-icon {
-  font-size: 12px;
-  color: #666;
-  transition: transform 0.2s ease;
-}
-
-.expand-icon.expanded {
-  transform: rotate(90deg);
-}
-
-.section-content {
-  margin-top: 16px;
+  border: 1px solid #e5e5e5;
 }
 
 .extension-warning {

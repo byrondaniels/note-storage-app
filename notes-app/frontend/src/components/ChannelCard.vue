@@ -1,107 +1,131 @@
 <template>
   <div class="channel-card" :class="{ 'expanded': isExpanded }">
+    <!-- Collapsed Header -->
     <div class="channel-header" @click="toggleExpand">
       <div class="channel-info">
-        <span class="platform-icon">
-          {{ platformIcon }}
-        </span>
+        <span class="platform-icon">{{ platformIcon }}</span>
         <span class="channel-name">{{ channel.name }}</span>
         <span class="note-count">{{ channel.noteCount }} notes</span>
       </div>
-      <div class="channel-status">
+      <div class="channel-actions">
+        <button
+          v-if="channel.platform === 'youtube' && extensionAvailable && !isExpanded"
+          @click.stop="quickSync"
+          class="quick-sync-btn"
+          title="Sync new videos"
+        >
+          Sync
+        </button>
         <span v-if="hasCustomPrompt" class="custom-badge">Custom</span>
         <span class="expand-icon">{{ isExpanded ? '▼' : '▶' }}</span>
       </div>
     </div>
 
-    <div v-if="isExpanded" class="channel-settings-form">
-      <div class="form-group">
-        <label>Prompt Template:</label>
-        <div class="prompt-template-row">
-          <select
-            v-model="templateSource"
-            @change="onTemplateChange"
-            class="template-select"
-          >
-            <option value="default">Default</option>
-            <option
-              v-for="ch in otherChannelsWithPrompts"
-              :key="ch.name"
-              :value="ch.name"
+    <!-- Expanded Content -->
+    <div v-if="isExpanded" class="channel-content">
+      <!-- Quick Actions Bar -->
+      <div class="quick-actions">
+        <SyncVideos
+          v-if="channel.platform === 'youtube'"
+          :channel="channel"
+          :extensionAvailable="extensionAvailable"
+          :channelUrl="channelUrl"
+          :progress="syncProgress"
+          @sync-start="$emit('sync-start', $event)"
+        />
+      </div>
+
+      <!-- Advanced Settings Toggle -->
+      <div class="advanced-toggle" @click="showAdvanced = !showAdvanced">
+        <span class="toggle-icon">{{ showAdvanced ? '▼' : '▶' }}</span>
+        <span class="toggle-label">Advanced Settings</span>
+      </div>
+
+      <!-- Advanced Settings Content -->
+      <div v-if="showAdvanced" class="advanced-content">
+        <!-- Prompt Settings -->
+        <div class="settings-section">
+          <h4>Summary Prompt</h4>
+
+          <div class="form-group">
+            <label>Template:</label>
+            <select
+              v-model="templateSource"
+              @change="onTemplateChange"
+              class="template-select"
             >
-              {{ ch.name }}
-            </option>
-            <option value="custom">Custom</option>
-          </select>
+              <option value="default">Default</option>
+              <option
+                v-for="ch in otherChannelsWithPrompts"
+                :key="ch.name"
+                :value="ch.name"
+              >
+                {{ ch.name }}
+              </option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Prompt Text:</label>
+            <div v-if="templateSource !== 'custom'" class="prompt-readonly">
+              {{ promptTextDisplay }}
+            </div>
+            <textarea
+              v-else
+              v-model="promptText"
+              placeholder="Enter instructions for how to analyze and summarize the content..."
+              rows="3"
+              class="prompt-textarea"
+            ></textarea>
+          </div>
+
+          <div class="form-group">
+            <label>Output Schema (JSON):</label>
+            <div v-if="templateSource !== 'custom'" class="prompt-readonly schema-readonly">
+              {{ promptSchemaDisplay }}
+            </div>
+            <textarea
+              v-else
+              v-model="promptSchema"
+              placeholder='{"summary": "string", "key_points": ["string"]}'
+              rows="4"
+              class="prompt-textarea schema-textarea"
+            ></textarea>
+          </div>
+
+          <div class="form-actions">
+            <button
+              @click="saveSettings"
+              :disabled="saving"
+              class="save-btn"
+            >
+              {{ saving ? 'Saving...' : 'Save Settings' }}
+            </button>
+            <span v-if="showSaved" class="saved-indicator">Saved!</span>
+          </div>
         </div>
-      </div>
 
-      <div class="form-group">
-        <label>Prompt Text:</label>
-        <div v-if="templateSource !== 'custom'" class="prompt-readonly">
-          {{ promptTextDisplay }}
+        <!-- Resummarize Section -->
+        <ResummarizePanel
+          :channel="channel"
+          :notes="notes"
+          :loadingNotes="loadingNotes"
+          :templateSource="templateSource"
+          :promptText="promptText"
+          :promptSchema="promptSchema"
+          :channelSettings="channelSettings"
+          @refresh-summary="$emit('refresh-summary', $event)"
+        />
+
+        <!-- Danger Zone -->
+        <div class="danger-zone">
+          <h4>Danger Zone</h4>
+          <p>Permanently delete all notes from this channel.</p>
+          <button @click="$emit('delete-channel', channel)" class="delete-all-btn">
+            Delete All Notes
+          </button>
         </div>
-        <textarea
-          v-else
-          v-model="promptText"
-          placeholder="Enter instructions for how to analyze and summarize the content..."
-          rows="4"
-          class="prompt-textarea"
-        ></textarea>
-      </div>
-
-      <div class="form-group">
-        <label>Output Schema (JSON):</label>
-        <div v-if="templateSource !== 'custom'" class="prompt-readonly schema-readonly">
-          {{ promptSchemaDisplay }}
-        </div>
-        <textarea
-          v-else
-          v-model="promptSchema"
-          placeholder='{"summary": "string", "key_points": ["string"]}'
-          rows="6"
-          class="prompt-textarea schema-textarea"
-        ></textarea>
-        <p class="help-text">Define the JSON structure for extracted data. Must include a "summary" field.</p>
-      </div>
-
-      <div class="form-actions">
-        <button
-          @click="saveSettings"
-          :disabled="saving"
-          class="save-btn"
-        >
-          {{ saving ? 'Saving...' : 'Save Settings' }}
-        </button>
-        <span v-if="showSaved" class="saved-indicator">Saved!</span>
-      </div>
-
-      <SyncVideos
-        v-if="channel.platform === 'youtube'"
-        :channel="channel"
-        :extensionAvailable="extensionAvailable"
-        :channelUrl="channelUrl"
-        :progress="syncProgress"
-        @sync-start="$emit('sync-start', $event)"
-      />
-
-      <ResummarizePanel
-        :channel="channel"
-        :notes="notes"
-        :loadingNotes="loadingNotes"
-        :templateSource="templateSource"
-        :promptText="promptText"
-        :promptSchema="promptSchema"
-        :channelSettings="channelSettings"
-        @refresh-summary="$emit('refresh-summary', $event)"
-      />
-
-      <div class="danger-zone">
-        <h4>Danger Zone</h4>
-        <p>Delete all notes from this channel. This cannot be undone.</p>
-        <button @click="$emit('delete-channel', channel)" class="delete-all-btn">
-          Delete All Notes
-        </button>
       </div>
     </div>
   </div>
@@ -167,6 +191,7 @@ export default {
   },
   data() {
     return {
+      showAdvanced: false,
       templateSource: 'default',
       promptText: '',
       promptSchema: '',
@@ -217,6 +242,8 @@ export default {
     isExpanded(newVal) {
       if (newVal) {
         this.initializeSettings()
+      } else {
+        this.showAdvanced = false
       }
     }
   },
@@ -233,6 +260,9 @@ export default {
     },
     toggleExpand() {
       this.$emit('toggle-expand', this.channel.name)
+    },
+    quickSync() {
+      this.$emit('sync-start', { channel: this.channel, videoLimit: 10 })
     },
     onTemplateChange() {
       if (this.templateSource === 'custom') {
@@ -304,31 +334,41 @@ export default {
 .channel-card {
   background: white;
   border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
-  transition: box-shadow 0.2s;
+  transition: all 0.2s;
 }
 
 .channel-card:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .channel-card.expanded {
   border-color: #007AFF;
+  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.15);
 }
 
+/* Header */
 .channel-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px;
   cursor: pointer;
-  background: #fafafa;
+  transition: background 0.2s;
+}
+
+.channel-header:hover {
+  background: #f8f8f8;
 }
 
 .channel-card.expanded .channel-header {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
+}
+
+.channel-card.expanded .channel-header:hover {
+  background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%);
 }
 
 .channel-info {
@@ -338,7 +378,7 @@ export default {
 }
 
 .platform-icon {
-  font-size: 20px;
+  font-size: 22px;
 }
 
 .channel-name {
@@ -351,60 +391,124 @@ export default {
   opacity: 0.7;
 }
 
-.channel-status {
+.channel-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+}
+
+.quick-sync-btn {
+  background: #007AFF;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.quick-sync-btn:hover {
+  background: #0056b3;
 }
 
 .custom-badge {
   background: #28a745;
   color: white;
-  padding: 2px 8px;
+  padding: 3px 8px;
   border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .channel-card.expanded .custom-badge {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.25);
 }
 
 .expand-icon {
-  font-size: 12px;
+  font-size: 11px;
   opacity: 0.6;
+  margin-left: 4px;
 }
 
-.channel-settings-form {
+/* Content */
+.channel-content {
+  border-top: 1px solid #e5e5e5;
+}
+
+.quick-actions {
+  padding: 16px 20px;
+  background: #fafafa;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+/* Advanced Toggle */
+.advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 20px;
+  cursor: pointer;
+  color: #666;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.advanced-toggle:hover {
+  background: #f8f8f8;
+  color: #333;
+}
+
+.toggle-icon {
+  font-size: 10px;
+  color: #999;
+}
+
+.toggle-label {
+  color: inherit;
+}
+
+/* Advanced Content */
+.advanced-content {
   padding: 20px;
-  border-top: 1px solid #e0e0e0;
+}
+
+.settings-section {
+  margin-bottom: 24px;
+}
+
+.settings-section h4 {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
 }
 
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .form-group > label {
   display: block;
-  font-weight: 600;
-  margin-bottom: 10px;
-  color: #333;
-}
-
-.prompt-template-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: #555;
+  font-size: 13px;
 }
 
 .template-select {
-  padding: 6px 12px;
+  padding: 8px 12px;
   border: 1px solid #ddd;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 14px;
   background: white;
   cursor: pointer;
+  min-width: 150px;
 }
 
 .template-select:focus {
@@ -414,7 +518,7 @@ export default {
 
 .prompt-textarea {
   width: 100%;
-  padding: 12px;
+  padding: 10px 12px;
   border: 1px solid #ddd;
   border-radius: 6px;
   font-size: 13px;
@@ -433,39 +537,33 @@ export default {
   background: #f5f5f5;
   border: 1px solid #e0e0e0;
   border-radius: 6px;
-  padding: 12px;
+  padding: 10px 12px;
   font-size: 13px;
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
   line-height: 1.5;
-  color: #555;
+  color: #666;
   white-space: pre-wrap;
-  max-height: 150px;
+  max-height: 100px;
   overflow-y: auto;
 }
 
 .schema-readonly,
 .schema-textarea {
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
   font-size: 12px;
-}
-
-.help-text {
-  font-size: 13px;
-  color: #666;
-  margin-top: 8px;
 }
 
 .form-actions {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
+  margin-top: 16px;
 }
 
 .save-btn {
   background: #007AFF;
   color: white;
   border: none;
-  padding: 10px 24px;
+  padding: 10px 20px;
   border-radius: 6px;
   font-size: 14px;
   font-weight: 500;
@@ -485,22 +583,27 @@ export default {
 .saved-indicator {
   color: #28a745;
   font-weight: 500;
-}
-
-.danger-zone {
-  margin-top: 24px;
-  padding-top: 20px;
-  border-top: 1px solid #ffcccc;
-}
-
-.danger-zone h4 {
-  color: #dc3545;
-  margin: 0 0 8px 0;
   font-size: 14px;
 }
 
+/* Danger Zone */
+.danger-zone {
+  margin-top: 24px;
+  padding: 16px;
+  background: #fff5f5;
+  border: 1px solid #fed7d7;
+  border-radius: 8px;
+}
+
+.danger-zone h4 {
+  color: #c53030;
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .danger-zone p {
-  color: #666;
+  color: #742a2a;
   font-size: 13px;
   margin: 0 0 12px 0;
 }
@@ -511,7 +614,8 @@ export default {
   border: none;
   padding: 8px 16px;
   border-radius: 6px;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   transition: background 0.2s;
 }
