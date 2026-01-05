@@ -57,10 +57,9 @@ function replaceTemplatePlaceholders(template, data) {
   return replacePlaceholders(JSON.parse(JSON.stringify(template)));
 }
 
-// Export for ES6 modules (background, popup, options)
-export { replaceTemplatePlaceholders };
+// Note: export removed - content scripts don't support ES modules
 
-// Also make available globally for content scripts (when loaded as regular script)
+// Make available globally for content scripts (when loaded as regular script)
 if (typeof window !== 'undefined') {
   window.replaceTemplatePlaceholders = replaceTemplatePlaceholders;
 }

@@ -18,14 +18,14 @@ import (
 type SummaryService struct {
 	notesRepo           *repository.NotesRepository
 	channelSettingsRepo *repository.ChannelSettingsRepository
-	aiClient            *ai.AIClient
+	aiClient            ai.Client
 }
 
 // NewSummaryService creates a new SummaryService
 func NewSummaryService(
 	notesRepo *repository.NotesRepository,
 	channelSettingsRepo *repository.ChannelSettingsRepository,
-	aiClient *ai.AIClient,
+	aiClient ai.Client,
 ) *SummaryService {
 	return &SummaryService{
 		notesRepo:           notesRepo,

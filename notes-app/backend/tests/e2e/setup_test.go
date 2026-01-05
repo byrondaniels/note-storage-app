@@ -97,17 +97,20 @@ func SetupTestEnv(t *testing.T) *TestEnv {
 	}
 
 	// Initialize AI client (mock if no API key)
-	var aiClient *ai.AIClient
+	var aiClient ai.Client
 	if geminiAPIKey != "" {
 		aiClient, err = ai.NewAIClient(context.Background(), geminiAPIKey)
 		if err != nil {
-			t.Logf("Warning: Could not create AI client: %v. AI features will be skipped.", err)
+			t.Logf("Warning: Could not create AI client: %v. Using mock AI client.", err)
+			aiClient = ai.NewMockAIClient()
 		}
+	} else {
+		aiClient = ai.NewMockAIClient()
 	}
 
-	// Initialize worker pool
+	// Initialize worker pool (always initialize with AI client, even if mock)
 	var workerPool *services.WorkerPool
-	if aiClient != nil && qdrantClient != nil {
+	if qdrantClient != nil {
 		workerPool = services.NewWorkerPool(1, 10, chunksRepo, aiClient, qdrantClient)
 		workerPool.Start()
 	}
@@ -123,7 +126,7 @@ func SetupTestEnv(t *testing.T) *TestEnv {
 	)
 
 	var searchService *services.SearchService
-	if aiClient != nil && qdrantClient != nil {
+	if qdrantClient != nil {
 		searchService = services.NewSearchService(notesRepo, aiClient, qdrantClient)
 	}
 
@@ -149,15 +152,13 @@ func SetupTestEnv(t *testing.T) *TestEnv {
 	categoriesHandler.RegisterRoutes(router)
 	channelsHandler.RegisterRoutes(router)
 
-	// Register search and summary handlers if AI is available
-	if aiClient != nil && searchService != nil {
+	// Register search and summary handlers
+	if searchService != nil {
 		searchHandler := handlers.NewSearchHandler(searchService, aiClient)
 		searchHandler.RegisterRoutes(router)
 	}
-	if summaryService != nil {
-		summaryHandler := handlers.NewSummaryHandler(summaryService)
-		summaryHandler.RegisterRoutes(router)
-	}
+	summaryHandler := handlers.NewSummaryHandler(summaryService)
+	summaryHandler.RegisterRoutes(router)
 
 	testEnv = &TestEnv{
 		Router:      router,

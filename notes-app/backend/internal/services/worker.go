@@ -20,7 +20,7 @@ type WorkerPool struct {
 	workerCount  int
 	wg           sync.WaitGroup
 	chunksRepo   *repository.ChunksRepository
-	aiClient     *ai.AIClient
+	aiClient     ai.Client
 	qdrantClient *vectordb.QdrantClient
 }
 
@@ -29,7 +29,7 @@ func NewWorkerPool(
 	workerCount int,
 	queueSize int,
 	chunksRepo *repository.ChunksRepository,
-	aiClient *ai.AIClient,
+	aiClient ai.Client,
 	qdrantClient *vectordb.QdrantClient,
 ) *WorkerPool {
 	return &WorkerPool{

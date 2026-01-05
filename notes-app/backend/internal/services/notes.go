@@ -21,7 +21,7 @@ type NotesService struct {
 	notesRepo           *repository.NotesRepository
 	chunksRepo          *repository.ChunksRepository
 	channelSettingsRepo *repository.ChannelSettingsRepository
-	aiClient            *ai.AIClient
+	aiClient            ai.Client
 	qdrantClient        *vectordb.QdrantClient
 	workerPool          *WorkerPool
 }
@@ -31,7 +31,7 @@ func NewNotesService(
 	notesRepo *repository.NotesRepository,
 	chunksRepo *repository.ChunksRepository,
 	channelSettingsRepo *repository.ChannelSettingsRepository,
-	aiClient *ai.AIClient,
+	aiClient ai.Client,
 	qdrantClient *vectordb.QdrantClient,
 	workerPool *WorkerPool,
 ) *NotesService {

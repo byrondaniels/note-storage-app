@@ -1,27 +1,23 @@
 package handlers
 
 import (
-	"context"
-	"fmt"
 	"net/http"
 
 	"backend/internal/ai"
-	"backend/internal/config"
 	"backend/internal/models"
 	"backend/internal/services"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/generative-ai-go/genai"
 )
 
 // SearchHandler handles HTTP requests for search and Q&A operations
 type SearchHandler struct {
 	searchService *services.SearchService
-	aiClient      *ai.AIClient
+	aiClient      ai.Client
 }
 
 // NewSearchHandler creates a new SearchHandler
-func NewSearchHandler(searchService *services.SearchService, aiClient *ai.AIClient) *SearchHandler {
+func NewSearchHandler(searchService *services.SearchService, aiClient ai.Client) *SearchHandler {
 	return &SearchHandler{
 		searchService: searchService,
 		aiClient:      aiClient,
@@ -70,24 +66,9 @@ func (h *SearchHandler) AskAIAboutNote(c *gin.Context) {
 		return
 	}
 
-	// Create a combined prompt with the user's question and the note content
-	fullPrompt := fmt.Sprintf(`%s
-
-Content to analyze:
-%s`, req.Prompt, req.Content)
-
-	// Use Gemini to generate a response
-	ctx := context.Background()
-	model := h.aiClient.GenerativeModel(config.GENERATION_MODEL)
-	result, err := model.GenerateContent(ctx, genai.Text(fullPrompt))
+	response, err := h.aiClient.AskAboutContent(req.Prompt, req.Content)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate AI response"})
-		return
-	}
-
-	response, err := ai.ExtractTextResponse(result)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to extract AI response"})
 		return
 	}
 

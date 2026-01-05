@@ -83,17 +83,9 @@ const PATTERNS = {
   videoId: /[?&]v=([^&]+)/
 };
 
-// Export for ES6 modules
-export {
-  PLATFORMS,
-  PLATFORM_PATTERNS,
-  BUTTON_CONFIG,
-  TIMING,
-  CONTENT_LIMITS,
-  PATTERNS
-};
+// Note: export removed - content scripts don't support ES modules
 
-// Also make available globally for content scripts
+// Make available globally for content scripts
 if (typeof window !== 'undefined') {
   window.PLATFORMS = PLATFORMS;
   window.PLATFORM_PATTERNS = PLATFORM_PATTERNS;

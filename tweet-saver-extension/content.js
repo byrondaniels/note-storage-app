@@ -401,14 +401,15 @@ class SocialMediaSaver {
 
   /**
    * Extract and save transcript for current video
+   * @param {string} channelName - Optional channel name to use (for consistency during imports)
    * @returns {Promise<Object>} Result object with success status
    */
-  async extractAndSaveTranscript() {
+  async extractAndSaveTranscript(channelName) {
     if (this.platform !== 'youtube' || !this.platformHandler) {
       throw new Error('YouTube handler not available');
     }
 
-    const result = await this.platformHandler.extractAndSaveTranscript();
+    const result = await this.platformHandler.extractAndSaveTranscript(channelName);
 
     if (!result.success) {
       return result;
@@ -464,7 +465,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
       }
       socialMediaSaver.scrapeChannelVideos(message.limit || 20)
-        .then(videos => sendResponse({ success: true, videos }))
+        .then(result => sendResponse({ success: true, videos: result.videos, channelName: result.channelName }))
         .catch(error => sendResponse({ success: false, error: error.message }));
       return true;
 
@@ -473,7 +474,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: 'Content script not initialized' });
         return true;
       }
-      socialMediaSaver.extractAndSaveTranscript()
+      socialMediaSaver.extractAndSaveTranscript(message.channelName)
         .then(result => sendResponse(result))
         .catch(error => sendResponse({ success: false, error: error.message }));
       return true;

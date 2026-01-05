@@ -229,14 +229,41 @@ class YouTubeHandler extends BasePlatformHandler {
   }
 
   /**
+   * Extract channel name from video page (consistent with extractChannelName for channel pages)
+   * @returns {string} Channel name
+   */
+  extractVideoPageChannelName() {
+    // Try various selectors for channel name on video watch pages
+    const selectors = [
+      '#channel-name yt-formatted-string a',
+      '#channel-name a',
+      '#channel-name yt-formatted-string',
+      'ytd-channel-name yt-formatted-string a',
+      'ytd-channel-name #text',
+      '#owner-name a',
+      '.ytd-channel-name a'
+    ];
+
+    for (const selector of selectors) {
+      const element = document.querySelector(selector);
+      if (element && element.textContent.trim()) {
+        const name = element.textContent.trim();
+        console.log('Social Media Note Saver: Found video page channel name:', name, 'via', selector);
+        return name;
+      }
+    }
+
+    console.log('Social Media Note Saver: Could not find channel name on video page');
+    return 'Unknown Channel';
+  }
+
+  /**
    * Get current video information
    * @returns {Object} Video info { title, channel, url, videoId, platform }
    */
   getVideoInfo() {
     const videoTitle = document.querySelector('#title h1, .title, .watch-main-col .watch-title')?.textContent?.trim() || 'Unknown Title';
-    // Use more specific selector to avoid duplicate text - get the innermost text element
-    const channelElement = document.querySelector('#channel-name a, #channel-name yt-formatted-string, ytd-channel-name yt-formatted-string a, .ytd-channel-name a');
-    const channelName = channelElement?.textContent?.trim() || 'Unknown Channel';
+    const channelName = this.extractVideoPageChannelName();
     const videoUrl = window.location.href.split('&')[0]; // Remove extra parameters
 
     // Handle both regular videos (/watch?v=) and live streams (/live/)
@@ -295,15 +322,53 @@ class YouTubeHandler extends BasePlatformHandler {
   }
 
   /**
+   * Extract channel name from the current page
+   * @returns {string} Channel name or 'Unknown Channel'
+   */
+  extractChannelName() {
+    // Try various selectors for channel name
+    const selectors = [
+      'ytd-channel-name #text',
+      '#channel-name #text',
+      'yt-formatted-string.ytd-channel-name',
+      '#owner-name a',
+      '#channel-header-container #text',
+      'ytd-c4-tabbed-header-renderer #channel-name'
+    ];
+
+    for (const selector of selectors) {
+      const element = document.querySelector(selector);
+      if (element && element.textContent.trim()) {
+        const name = element.textContent.trim();
+        console.log('Social Media Note Saver: Found channel name:', name, 'via', selector);
+        return name;
+      }
+    }
+
+    // Fallback: try to extract from URL
+    const urlMatch = window.location.pathname.match(/@([^\/]+)/);
+    if (urlMatch) {
+      console.log('Social Media Note Saver: Channel name from URL:', urlMatch[1]);
+      return urlMatch[1];
+    }
+
+    console.log('Social Media Note Saver: Could not find channel name');
+    return 'Unknown Channel';
+  }
+
+  /**
    * Scrape channel videos (for bulk import)
    * @param {number} limit - Maximum number of videos to scrape
-   * @returns {Promise<Array<Object>>} Array of video objects
+   * @returns {Promise<Object>} Object with videos array and channelName
    */
   async scrapeChannelVideos(limit = 20) {
     console.log('Social Media Note Saver: Scraping channel videos, limit:', limit);
 
     // Wait for page to load
     await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Extract channel name first
+    const channelName = this.extractChannelName();
 
     // Scroll to load more videos
     console.log('Social Media Note Saver: Scrolling to load videos...');
@@ -356,15 +421,16 @@ class YouTubeHandler extends BasePlatformHandler {
       }
     }
 
-    console.log('Social Media Note Saver: Scraped', videos.length, 'videos (limit:', limit, ')');
-    return videos;
+    console.log('Social Media Note Saver: Scraped', videos.length, 'videos (limit:', limit, ') from channel:', channelName);
+    return { videos, channelName };
   }
 
   /**
    * Extract and save current video transcript
+   * @param {string} channelName - Optional channel name to use (for consistency during imports)
    * @returns {Promise<Object>} Result object with success status
    */
-  async extractAndSaveTranscript() {
+  async extractAndSaveTranscript(channelName) {
     console.log('Social Media Note Saver: Extracting and saving transcript...');
 
     try {
@@ -375,6 +441,9 @@ class YouTubeHandler extends BasePlatformHandler {
       if (!videoId) {
         throw new Error('Could not determine video ID');
       }
+
+      // Use passed channelName if provided (for import consistency), otherwise use extracted name
+      const author = channelName || videoInfo.channel;
 
       // Extract transcript
       console.log('Social Media Note Saver: Extracting transcript for:', videoInfo.title);
@@ -387,8 +456,8 @@ class YouTubeHandler extends BasePlatformHandler {
       // Build payload
       const postData = {
         content: transcript,
-        author: videoInfo.channel,
-        handle: `@${videoInfo.channel}`,
+        author: author,
+        handle: `@${author}`,
         url: videoInfo.url,
         timestamp: new Date().toISOString(),
         platform: 'youtube',

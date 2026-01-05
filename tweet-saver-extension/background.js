@@ -40,7 +40,10 @@ chrome.runtime.onMessageExternal.addListener((request, sender, sendResponse) => 
   if (request.action === 'importChannel') {
     // Store the sender tab ID for progress updates
     externalSenderTabId = sender.tab ? sender.tab.id : null;
-    console.log('Social Media Note Saver: External import request, sender tab:', externalSenderTabId);
+    console.log('Social Media Note Saver: External import request');
+    console.log('  - sender.tab:', sender.tab);
+    console.log('  - sender.tab.id:', externalSenderTabId);
+    console.log('  - sender.url:', sender.url);
 
     channelImportService.handleChannelImport(request.channelUrl, request.limit || 20, externalSenderTabId)
       .then(() => {

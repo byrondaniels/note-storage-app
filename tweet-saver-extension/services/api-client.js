@@ -101,10 +101,5 @@ class NotesApiClient {
   }
 }
 
-// Export for ES6 modules (background script)
+// ES module export for background.js and other module contexts
 export { NotesApiClient };
-
-// Also make available globally for content scripts (when loaded as regular script)
-if (typeof window !== 'undefined') {
-  window.NotesApiClient = NotesApiClient;
-}

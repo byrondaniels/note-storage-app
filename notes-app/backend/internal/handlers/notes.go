@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"backend/internal/models"
 	"backend/internal/services"
@@ -68,8 +69,8 @@ func (h *NotesHandler) UpdateNote(c *gin.Context) {
 
 	updatedNote, err := h.notesService.UpdateNote(c.Request.Context(), noteID, &req)
 	if err != nil {
-		if err.Error() == "invalid note ID: encoding/hex: invalid byte: U+0069 'i'" ||
-			err.Error() == "note not found" {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "invalid note ID") || errMsg == "note not found" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Note not found"})
 			return
 		}
@@ -86,8 +87,8 @@ func (h *NotesHandler) DeleteNote(c *gin.Context) {
 
 	err := h.notesService.DeleteNote(c.Request.Context(), noteID)
 	if err != nil {
-		if err.Error() == "invalid note ID: encoding/hex: invalid byte: U+0069 'i'" ||
-			err.Error() == "note not found" {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "invalid note ID") || errMsg == "note not found" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Note not found"})
 			return
 		}
