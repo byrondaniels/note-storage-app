@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 
 	"backend/internal/models"
@@ -34,6 +35,7 @@ func (h *SummaryHandler) SummarizeNote(c *gin.Context) {
 		Content: req.Content,
 	})
 	if err != nil {
+		log.Printf("Error generating summary: %v", err)
 		if err.Error() == "invalid note ID: encoding/hex: invalid byte: U+0069 'i'" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid note ID"})
 			return

@@ -57,9 +57,13 @@ func SetupTestEnv(t *testing.T) *TestEnv {
 	}
 
 	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
-	if geminiAPIKey == "" {
-		// Use mock AI client for tests without API key
-		t.Log("GEMINI_API_KEY not set, using mock AI client")
+	useRealAI := os.Getenv("USE_REAL_AI") == "true"
+
+	if !useRealAI {
+		t.Log("USE_REAL_AI not set to 'true', using mock AI client (set USE_REAL_AI=true to use real Gemini API)")
+	} else if geminiAPIKey == "" {
+		t.Log("USE_REAL_AI=true but GEMINI_API_KEY not set, falling back to mock AI client")
+		useRealAI = false
 	}
 
 	// Connect to MongoDB
@@ -96,13 +100,15 @@ func SetupTestEnv(t *testing.T) *TestEnv {
 		}
 	}
 
-	// Initialize AI client (mock if no API key)
+	// Initialize AI client (mock unless USE_REAL_AI=true)
 	var aiClient ai.Client
-	if geminiAPIKey != "" {
+	if useRealAI {
 		aiClient, err = ai.NewAIClient(context.Background(), geminiAPIKey)
 		if err != nil {
 			t.Logf("Warning: Could not create AI client: %v. Using mock AI client.", err)
 			aiClient = ai.NewMockAIClient()
+		} else {
+			t.Log("Using REAL Gemini AI client - API calls will consume quota")
 		}
 	} else {
 		aiClient = ai.NewMockAIClient()

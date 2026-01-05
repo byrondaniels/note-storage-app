@@ -1,50 +1,36 @@
 <template>
   <div class="channel-settings">
     <h1>Channel Settings</h1>
-    <p class="subtitle">Import YouTube channels and configure custom summary prompts</p>
+    <p class="subtitle">Manage your imported channels and add new content</p>
 
-    <ChannelImporter
-      ref="importer"
-      :extensionAvailable="extensionAvailable"
-      :channelsWithCustomPrompts="channelsWithCustomPrompts"
-      :channelSettings="channelSettings"
-      :defaultPromptText="DEFAULT_PROMPT_TEXT"
-      :defaultPromptSchema="DEFAULT_PROMPT_SCHEMA"
-      @import-start="handleImportStart"
-    />
+    <!-- Tab Navigation -->
+    <div class="tabs">
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'channels' }"
+        @click="activeTab = 'channels'"
+      >
+        Channels
+        <span v-if="channels.length > 0" class="tab-count">{{ channels.length }}</span>
+      </button>
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'import' }"
+        @click="activeTab = 'import'"
+      >
+        Import New
+      </button>
+    </div>
 
-    <BaseModal
-      :show="showDeleteModal"
-      title="Delete All Notes"
-      size="small"
-      @close="showDeleteModal = false"
-    >
-      <p>Are you sure you want to delete all <strong>{{ channelToDelete?.noteCount }}</strong> notes from <strong>{{ channelToDelete?.name }}</strong>?</p>
-      <p class="warning">This action cannot be undone.</p>
-
-      <template #footer>
-        <button @click="showDeleteModal = false" class="cancel-btn">Cancel</button>
-        <button @click="confirmDelete" :disabled="deleting" class="delete-btn">
-          {{ deleting ? 'Deleting...' : 'Delete All' }}
-        </button>
-      </template>
-    </BaseModal>
-
-    <PromptTemplates
-      :savedTemplates="savedTemplates"
-      :channelSettings="channelSettings"
-      @save-template="handleSaveTemplate"
-      @delete-template="handleDeleteTemplate"
-    />
-
-    <div class="channels-section">
-      <h2>Channels</h2>
-      <p class="section-desc">Channels with imported notes.</p>
-
+    <!-- Channels Tab -->
+    <div v-if="activeTab === 'channels'" class="tab-content">
       <div v-if="loading" class="loading">Loading channels...</div>
 
       <div v-else-if="channels.length === 0" class="no-channels">
-        <p>No channels with notes yet. Import some YouTube videos to get started.</p>
+        <div class="empty-icon">📺</div>
+        <p>No channels yet</p>
+        <p class="empty-hint">Import YouTube videos to get started</p>
+        <button @click="activeTab = 'import'" class="import-cta-btn">Import Channel</button>
       </div>
 
       <div v-else class="channels-list">
@@ -69,6 +55,37 @@
         />
       </div>
     </div>
+
+    <!-- Import Tab -->
+    <div v-if="activeTab === 'import'" class="tab-content">
+      <ChannelImporter
+        ref="importer"
+        :extensionAvailable="extensionAvailable"
+        :channelsWithCustomPrompts="channelsWithCustomPrompts"
+        :channelSettings="channelSettings"
+        :defaultPromptText="DEFAULT_PROMPT_TEXT"
+        :defaultPromptSchema="DEFAULT_PROMPT_SCHEMA"
+        @import-start="handleImportStart"
+      />
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <BaseModal
+      :show="showDeleteModal"
+      title="Delete All Notes"
+      size="small"
+      @close="showDeleteModal = false"
+    >
+      <p>Are you sure you want to delete all <strong>{{ channelToDelete?.noteCount }}</strong> notes from <strong>{{ channelToDelete?.name }}</strong>?</p>
+      <p class="warning">This action cannot be undone.</p>
+
+      <template #footer>
+        <button @click="showDeleteModal = false" class="cancel-btn">Cancel</button>
+        <button @click="confirmDelete" :disabled="deleting" class="delete-btn">
+          {{ deleting ? 'Deleting...' : 'Delete All' }}
+        </button>
+      </template>
+    </BaseModal>
   </div>
 </template>
 
@@ -77,7 +94,6 @@ import axios from 'axios'
 import { API_URL } from '../utils/api'
 import BaseModal from './shared/BaseModal.vue'
 import ChannelImporter from './ChannelImporter.vue'
-import PromptTemplates from './PromptTemplates.vue'
 import ChannelCard from './ChannelCard.vue'
 import { useApi } from '../composables/useApi'
 
@@ -95,7 +111,6 @@ export default {
   components: {
     BaseModal,
     ChannelImporter,
-    PromptTemplates,
     ChannelCard
   },
   setup() {
@@ -106,6 +121,7 @@ export default {
     return {
       DEFAULT_PROMPT_TEXT,
       DEFAULT_PROMPT_SCHEMA,
+      activeTab: 'channels',
       channels: [],
       channelSettings: {},
       loading: true,
@@ -129,9 +145,6 @@ export default {
     }
   },
   computed: {
-    savedTemplates() {
-      return Object.values(this.channelSettings).filter(s => s && (s.promptText || s.promptSchema))
-    },
     channelsWithCustomPrompts() {
       const channelsWithNotes = this.channels.filter(ch => {
         const settings = this.channelSettings[ch.name]
@@ -253,30 +266,6 @@ export default {
       } catch (error) {
         alert('Failed to refresh summary. Please try again.')
       }
-    },
-
-    async handleSaveTemplate({ channelName, promptText, promptSchema }) {
-      await this.api.request(async () => {
-        await axios.put(`${API_URL}/channel-settings/${encodeURIComponent(channelName)}`, {
-          platform: this.channelSettings[channelName]?.platform || 'youtube',
-          promptText: promptText,
-          promptSchema: promptSchema
-        })
-
-        this.channelSettings[channelName] = {
-          ...this.channelSettings[channelName],
-          channelName: channelName,
-          promptText: promptText,
-          promptSchema: promptSchema
-        }
-      })
-    },
-
-    async handleDeleteTemplate(channelName) {
-      await this.api.request(async () => {
-        await axios.delete(`${API_URL}/channel-settings/${encodeURIComponent(channelName)}`)
-        delete this.channelSettings[channelName]
-      })
     },
 
     promptDelete(channel) {
@@ -463,6 +452,10 @@ export default {
             this.$refs.importer.setMessage(`Import complete! ${parts.join(', ')}`, succeeded > 0 ? 'success' : 'warning')
 
             await this.loadData()
+            // Switch to channels tab after successful import
+            if (succeeded > 0) {
+              this.activeTab = 'channels'
+            }
           }
         }
         return
@@ -493,74 +486,157 @@ export default {
 .channel-settings {
   max-width: 800px;
   margin: 0 auto;
-  padding: var(--spacing-xl);
+  padding: 24px;
 }
 
 h1 {
   text-align: center;
-  color: var(--color-text-heading);
-  margin-bottom: 10px;
+  color: #1c1c1e;
+  margin-bottom: 8px;
+  font-size: 28px;
 }
 
 .subtitle {
   text-align: center;
-  color: var(--color-text-muted);
-  margin-bottom: var(--spacing-xxxl);
+  color: #8e8e93;
+  margin-bottom: 24px;
+  font-size: 15px;
 }
 
-.channels-section {
-  margin-bottom: var(--spacing-xxxl);
+/* Tab Navigation */
+.tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 24px;
+  border-bottom: 2px solid #e5e5e5;
 }
 
-.channels-section h2 {
-  font-size: var(--font-size-lg);
-  color: var(--color-text-secondary);
-  margin: 0 0 var(--spacing-sm) 0;
+.tab-btn {
+  flex: 1;
+  padding: 14px 20px;
+  background: none;
+  border: none;
+  font-size: 15px;
+  font-weight: 600;
+  color: #8e8e93;
+  cursor: pointer;
+  position: relative;
+  transition: color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
-.section-desc {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
-  margin: 0 0 var(--spacing-lg) 0;
+.tab-btn:hover {
+  color: #1c1c1e;
+}
+
+.tab-btn.active {
+  color: #007AFF;
+}
+
+.tab-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #007AFF;
+}
+
+.tab-count {
+  background: #007AFF;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.tab-btn:not(.active) .tab-count {
+  background: #e5e5e5;
+  color: #8e8e93;
+}
+
+/* Tab Content */
+.tab-content {
+  min-height: 300px;
 }
 
 .loading {
   text-align: center;
-  padding: 40px;
-  color: var(--color-text-muted);
+  padding: 60px;
+  color: #8e8e93;
+  font-size: 15px;
 }
 
+/* Empty State */
 .no-channels {
   text-align: center;
-  padding: 60px var(--spacing-xl);
-  background: var(--color-bg-light);
-  border-radius: var(--radius-lg);
+  padding: 60px 24px;
+  background: #f9f9f9;
+  border-radius: 12px;
+}
+
+.empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
 }
 
 .no-channels p {
-  margin: var(--spacing-sm) 0;
-  color: var(--color-text-muted);
+  margin: 0;
+  color: #1c1c1e;
+  font-size: 18px;
+  font-weight: 600;
 }
 
+.empty-hint {
+  color: #8e8e93 !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  margin-top: 8px !important;
+  margin-bottom: 20px !important;
+}
+
+.import-cta-btn {
+  background: #007AFF;
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.import-cta-btn:hover {
+  background: #0056b3;
+}
+
+/* Channels List */
 .channels-list {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-md);
+  gap: 12px;
 }
 
+/* Modal Styles */
 .warning {
-  color: var(--color-danger-dark);
-  font-weight: var(--font-weight-medium);
+  color: #dc3545;
+  font-weight: 500;
 }
 
 .cancel-btn {
   background: #e0e0e0;
-  color: var(--color-text-secondary);
+  color: #1c1c1e;
   border: none;
-  padding: 10px var(--spacing-xl);
-  border-radius: var(--radius-md);
+  padding: 10px 20px;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: var(--font-size-sm);
+  font-size: 14px;
 }
 
 .cancel-btn:hover {
@@ -568,13 +644,13 @@ h1 {
 }
 
 .delete-btn {
-  background: var(--color-danger-dark);
+  background: #dc3545;
   color: white;
   border: none;
-  padding: 10px var(--spacing-xl);
-  border-radius: var(--radius-md);
+  padding: 10px 20px;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: var(--font-size-sm);
+  font-size: 14px;
 }
 
 .delete-btn:hover:not(:disabled) {
@@ -582,7 +658,7 @@ h1 {
 }
 
 .delete-btn:disabled {
-  background: var(--color-text-lighter);
+  background: #ccc;
   cursor: not-allowed;
 }
 </style>
