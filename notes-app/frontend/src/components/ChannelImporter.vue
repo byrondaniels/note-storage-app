@@ -1,7 +1,5 @@
 <template>
   <div class="import-section">
-    <h2>Import YouTube Channel</h2>
-
     <div v-if="!extensionAvailable" class="extension-warning">
       <strong>Extension Not Found</strong>
       <p>The Social Media Note Saver extension is required for importing.</p>
@@ -275,17 +273,10 @@ export default {
 
 <style scoped>
 .import-section {
-  background: #f9f9f9;
-  border-radius: 8px;
+  background: white;
+  border-radius: 12px;
   padding: 24px;
-  margin-bottom: 30px;
-  border: 1px solid #e0e0e0;
-}
-
-.import-section h2 {
-  margin: 0 0 16px 0;
-  font-size: 18px;
-  color: #333;
+  border: 1px solid #e5e5e5;
 }
 
 .extension-warning {

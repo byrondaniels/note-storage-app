@@ -615,10 +615,12 @@ export default {
 
 <style scoped>
 .view-notes {
-  height: calc(100vh - 120px);
+  flex: 1;
   display: flex;
   flex-direction: column;
   background: var(--color-bg-tertiary);
+  overflow: hidden;
+  min-height: 0;
 }
 
 .loading, .error, .no-notes {
@@ -645,20 +647,22 @@ export default {
 }
 
 .notes-interface {
-  height: 100%;
+  flex: 1;
   display: flex;
   flex-direction: column;
   background: var(--color-bg-primary);
   border-radius: var(--radius-xl);
   overflow: hidden;
   box-shadow: var(--shadow-lg);
-  margin: var(--spacing-xl);
+  margin: 16px;
+  min-height: 0;
 }
 
 .notes-container {
   display: flex;
   flex: 1;
   overflow: hidden;
+  min-height: 0;
 }
 
 .note-content-panel {
@@ -666,6 +670,8 @@ export default {
   display: flex;
   flex-direction: column;
   background: var(--color-bg-primary);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .empty-selection {
