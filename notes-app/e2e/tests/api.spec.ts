@@ -161,7 +161,10 @@ test.describe('API E2E Tests', () => {
         data: { query: 'test query' },
       });
 
-      // May return 200 or 500 depending on AI configuration
+      // May return 200 or 500 depending on AI configuration (needs embeddings)
+      // Status 500 is acceptable when AI services are not configured
+      expect([200, 500]).toContain(response.status());
+
       if (response.ok()) {
         const results = await response.json();
         expect(Array.isArray(results)).toBeTruthy();

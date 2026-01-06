@@ -137,7 +137,7 @@ export class NotesPage {
 
   // Note detail interactions
   async getNoteContent() {
-    return this.page.locator('[data-testid="note-content"], .note-content, .note-detail .content');
+    return this.page.locator('.note-detail-content').first();
   }
 
   async getNoteTitle() {
@@ -182,9 +182,12 @@ export class NotesPage {
 
   // Delete note
   async deleteCurrentNote() {
-    await this.page.locator('[data-testid="delete-note"], button:has-text("Delete"), .delete-btn').click();
-    // Confirm deletion
-    await this.page.locator('[data-testid="confirm-delete"], button:has-text("Confirm"), button:has-text("Yes")').click();
+    // Click the delete button on the note detail
+    await this.page.locator('.delete-btn, button:has-text("Delete"), [data-testid="delete-note"]').first().click();
+    // Wait for modal to appear
+    await this.page.waitForSelector('.modal-overlay', { timeout: 5000 });
+    // Confirm deletion - look for the danger button in the modal footer
+    await this.page.locator('.modal-footer .btn-danger').click();
   }
 
   // Edit note

@@ -1,5 +1,5 @@
 <template>
-  <div id="app">
+  <div class="app-container">
     <nav>
       <router-link to="/view">View Notes</router-link>
       <router-link to="/ask">Ask AI</router-link>
@@ -22,7 +22,7 @@ html, body {
   height: 100%;
 }
 
-#app {
+#app, .app-container {
   font-family: Avenir, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
