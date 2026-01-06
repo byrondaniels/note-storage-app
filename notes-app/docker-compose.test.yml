@@ -63,11 +63,12 @@ services:
       retries: 10
 
   frontend-test:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        VUE_APP_API_URL: http://localhost:8081
     container_name: notes-frontend-test
     restart: unless-stopped
-    environment:
-      VUE_APP_API_URL: http://localhost:8081
     ports:
       - "3001:3000"
     depends_on:
