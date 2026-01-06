@@ -193,12 +193,14 @@ func (s *NotesService) CreateNote(ctx context.Context, req *models.CreateNoteReq
 	note.ID = noteID
 
 	// Queue job for embedding generation only (title, category, summary already done)
-	s.workerPool.Submit(models.ProcessingJob{
-		NoteID:   note.ID,
-		Title:    note.Title,
-		Content:  note.Content,
-		Metadata: note.Metadata,
-	})
+	if s.workerPool != nil {
+		s.workerPool.Submit(models.ProcessingJob{
+			NoteID:   note.ID,
+			Title:    note.Title,
+			Content:  note.Content,
+			Metadata: note.Metadata,
+		})
+	}
 
 	return &CreateNoteResult{
 		Note:      &note,
@@ -249,12 +251,14 @@ func (s *NotesService) UpdateNote(ctx context.Context, noteID string, req *model
 	}
 
 	// Queue re-processing job for embeddings
-	s.workerPool.Submit(models.ProcessingJob{
-		NoteID:   updatedNote.ID,
-		Title:    updatedNote.Title,
-		Content:  updatedNote.Content,
-		Metadata: updatedNote.Metadata,
-	})
+	if s.workerPool != nil {
+		s.workerPool.Submit(models.ProcessingJob{
+			NoteID:   updatedNote.ID,
+			Title:    updatedNote.Title,
+			Content:  updatedNote.Content,
+			Metadata: updatedNote.Metadata,
+		})
+	}
 
 	return updatedNote, nil
 }
@@ -288,11 +292,13 @@ func (s *NotesService) DeleteNote(ctx context.Context, noteID string) error {
 		// Don't fail the request, just log the error
 	}
 
-	// Delete embeddings from Qdrant
-	_, err = s.qdrantClient.DeleteByNoteID(objID)
-	if err != nil {
-		log.Printf("Failed to delete embeddings for note %s: %v", noteID, err)
-		// Don't fail the request, just log the error
+	// Delete embeddings from Qdrant (if available)
+	if s.qdrantClient != nil {
+		_, err = s.qdrantClient.DeleteByNoteID(objID)
+		if err != nil {
+			log.Printf("Failed to delete embeddings for note %s: %v", noteID, err)
+			// Don't fail the request, just log the error
+		}
 	}
 
 	return nil

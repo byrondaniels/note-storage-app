@@ -203,10 +203,12 @@ func (h *ChannelsHandler) DeleteChannelNotes(c *gin.Context) {
 			deletedChunks += int(chunkCount)
 		}
 
-		// Delete embeddings from Qdrant
-		_, err = h.qdrantClient.DeleteByNoteID(note.ID)
-		if err != nil {
-			log.Printf("Error deleting embeddings for note %s: %v", note.ID.Hex(), err)
+		// Delete embeddings from Qdrant (if available)
+		if h.qdrantClient != nil {
+			_, err = h.qdrantClient.DeleteByNoteID(note.ID)
+			if err != nil {
+				log.Printf("Error deleting embeddings for note %s: %v", note.ID.Hex(), err)
+			}
 		}
 
 		// Delete the note
